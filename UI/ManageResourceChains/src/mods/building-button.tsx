@@ -14,80 +14,94 @@ export const BuildingButton = () => {
 
     useEffect(() => {
         if (isBuildingSelected && selectedBuildingEntity !== 0) {
-            console.log("BuildingButton: Injecting button into DOM");
+            console.log("BuildingButton: Starting polling for actions section");
             
-            // Try multiple selectors to find the building panel
-            const selectors = [
-                '.infoview-panel-section_RXJ .content_1xS',  // Original attempt
-                '[class*="infoview-panel-section"] [class*="content"]',  // Partial match
-                '[class*="selected-info-panel"]',  // Selected info panel
-                '.game-info-panel',  // Generic info panel
-                '[class*="info-panel"]'  // Any info panel
-            ];
-            
-            let targetSection = null;
-            for (const selector of selectors) {
-                targetSection = document.querySelector(selector);
-                if (targetSection) {
-                    console.log(`Found section using selector: ${selector}`);
-                    break;
-                }
+            // Clear any existing interval
+            if ((window as any).manageResourceChainsInterval) {
+                clearInterval((window as any).manageResourceChainsInterval);
             }
             
-            // If still not found, try to find ANY panel-like div
-            if (!targetSection) {
-                console.log("Standard selectors failed, searching for panel elements...");
-                const allDivs = document.querySelectorAll('div[class*="panel"]');
-                console.log(`Found ${allDivs.length} divs with 'panel' in className`);
-                if (allDivs.length > 0) {
-                    // Log first few to help debug
-                    for (let i = 0; i < Math.min(5, allDivs.length); i++) {
-                        console.log(`Panel ${i}: ${allDivs[i].className}`);
-                    }
+            // Use polling like FirstPersonCamera does
+            const checkAndInject = () => {
+                // Target the actions section where FOCUS and TOGGLE TRAFFIC ROUTES buttons are
+                const actionsSection = document.querySelector('.actions-section_X1x');
+                
+                if (!actionsSection) {
+                    console.log("Actions section not found yet, will keep polling...");
+                    return;
                 }
-            }
-            
-            if (targetSection && !document.getElementById('manage-resource-chains-btn')) {
-                console.log("Found target section, creating button");
+                
+                // Check if button already exists
+                const existingButton = actionsSection.querySelector('#manage-resource-chains-btn');
+                if (existingButton) {
+                    console.log("Button already exists");
+                    return;
+                }
+                
+                console.log("Found actions section! Injecting button...");
                 
                 const buttonContainer = document.createElement('div');
                 buttonContainer.id = 'manage-resource-chains-btn';
-                buttonContainer.style.cssText = 'margin: 8rem 0; padding: 8rem;';
+                buttonContainer.style.cssText = 'margin-left: 6rem; margin-right: 8rem; display: inline-block;';
                 
                 const button = document.createElement('button');
-                button.className = 'button_Z9O button_ECf item_It6 item-mouse-states_Fmi item-focused_FuT';
+                button.className = 'button_Z9O button_ECf item_It6 item-mouse-states_Fmi item-focused_FuT button_xGY';
                 button.style.cssText = `
-                    width: 100%;
-                    padding: 12rem 16rem;
+                    padding: 8rem 12rem;
                     background: linear-gradient(180deg, #4a90e2 0%, #2e5c8a 100%);
                     color: white;
-                    border: 2px solid rgba(255, 255, 255, 0.3);
-                    border-radius: 6rem;
-                    font-size: 16rem;
-                    font-weight: 700;
+                    border: 1px solid rgba(255, 255, 255, 0.2);
+                    border-radius: 4rem;
                     cursor: pointer;
-                    text-transform: uppercase;
-                    letter-spacing: 1px;
                 `;
-                button.textContent = '🔗 MANAGE RESOURCE CHAINS';
+                
+                // Create icon
+                const icon = document.createElement('img');
+                icon.className = 'icon_Tdt icon_soN icon_Iwk';
+                icon.src = 'coui://uil/Colored/Connection.svg';
+                
+                button.appendChild(icon);
                 button.onclick = () => {
                     console.log("Manage Resource Chains clicked for entity:", selectedBuildingEntity);
                     // TODO: Open management panel
                 };
                 
                 buttonContainer.appendChild(button);
-                targetSection.appendChild(buttonContainer);
+                actionsSection.appendChild(buttonContainer);
                 
-                console.log("Button injected successfully into:", targetSection.className);
-            } else if (!targetSection) {
-                console.log("ERROR: Could not find any suitable panel section in DOM");
-            }
+                console.log("Button injected successfully!");
+                
+                // Clear interval after successful injection
+                clearInterval((window as any).manageResourceChainsInterval);
+                delete (window as any).manageResourceChainsInterval;
+            };
+            
+            // Check immediately
+            checkAndInject();
+            
+            // Set up polling
+            (window as any).manageResourceChainsInterval = setInterval(checkAndInject, 100);
+            
+            // Clear after timeout
+            setTimeout(() => {
+                if ((window as any).manageResourceChainsInterval) {
+                    clearInterval((window as any).manageResourceChainsInterval);
+                    delete (window as any).manageResourceChainsInterval;
+                }
+            }, 5000);
+            
         } else {
             // Remove button when no building is selected
             const existingButton = document.getElementById('manage-resource-chains-btn');
             if (existingButton) {
                 console.log("Removing button from DOM");
                 existingButton.remove();
+            }
+            
+            // Clear any polling interval
+            if ((window as any).manageResourceChainsInterval) {
+                clearInterval((window as any).manageResourceChainsInterval);
+                delete (window as any).manageResourceChainsInterval;
             }
         }
         
