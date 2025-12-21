@@ -31,6 +31,44 @@ export const BuildingButton = () => {
                     return;
                 }
                 
+                // ALWAYS log analysis data for debugging, even if button exists
+                console.log("=== BUILDING PANEL ANALYSIS ===");
+                console.log("Entity:", selectedBuildingEntity);
+                console.log("Actions section found:", actionsSection.className);
+                console.log("Actions section children count:", actionsSection.children.length);
+                console.log("Actions section HTML:", actionsSection.innerHTML.substring(0, 500));
+                
+                // Log all children to understand the structure
+                console.log("Children details:");
+                for (let i = 0; i < actionsSection.children.length; i++) {
+                    const child = actionsSection.children[i];
+                    console.log(`  Child ${i}:`, {
+                        tag: child.tagName,
+                        className: child.className,
+                        id: child.id,
+                        textContent: child.textContent?.substring(0, 50)
+                    });
+                }
+                
+                // Check if there are existing buttons
+                const existingButtons = actionsSection.querySelectorAll('button');
+                console.log("Existing buttons count:", existingButtons.length);
+                existingButtons.forEach((btn, idx) => {
+                    console.log(`  Button ${idx}:`, {
+                        className: btn.className,
+                        hasIcon: btn.querySelector('img') !== null,
+                        iconSrc: btn.querySelector('img')?.src
+                    });
+                });
+                
+                // Check parent structure to understand different layouts
+                const parentSection = actionsSection.parentElement;
+                console.log("Parent section:", {
+                    className: parentSection?.className,
+                    childrenCount: parentSection?.children.length
+                });
+                console.log("=== END ANALYSIS ===");
+                
                 // Check if button already exists
                 const existingButton = actionsSection.querySelector('#manage-resource-chains-btn');
                 if (existingButton) {
@@ -38,27 +76,18 @@ export const BuildingButton = () => {
                     return;
                 }
                 
-                console.log("Found actions section! Injecting button...");
+                console.log("Creating and injecting button...");
                 
-                const buttonContainer = document.createElement('div');
-                buttonContainer.id = 'manage-resource-chains-btn';
-                buttonContainer.style.cssText = 'margin-left: 6rem; margin-right: 8rem; display: inline-block;';
-                
+                // Create button directly without wrapper div, styled like FirstPersonCamera button
                 const button = document.createElement('button');
-                button.className = 'button_Z9O button_ECf item_It6 item-mouse-states_Fmi item-focused_FuT button_xGY';
-                button.style.cssText = `
-                    padding: 8rem 12rem;
-                    background: linear-gradient(180deg, #4a90e2 0%, #2e5c8a 100%);
-                    color: white;
-                    border: 1px solid rgba(255, 255, 255, 0.2);
-                    border-radius: 4rem;
-                    cursor: pointer;
-                `;
+                button.id = 'manage-resource-chains-btn';
+                button.className = 'button_Z9O button_ECf item_It6 item-mouse-states_Fmi item-selected_tAM item-focused_FuT button_Z9O button_ECf item_It6 item-mouse-states_Fmi item-selected_tAM item-focused_FuT button_xGY';
+                button.style.cssText = 'margin-left: 6rem; margin-right: 8rem;';
                 
-                // Create icon
+                // Create icon - use an icon that exists
                 const icon = document.createElement('img');
                 icon.className = 'icon_Tdt icon_soN icon_Iwk';
-                icon.src = 'coui://uil/Colored/Connection.svg';
+                icon.src = 'coui://uil/Standard/Link.svg';
                 
                 button.appendChild(icon);
                 button.onclick = () => {
@@ -66,8 +95,26 @@ export const BuildingButton = () => {
                     // TODO: Open management panel
                 };
                 
-                buttonContainer.appendChild(button);
-                actionsSection.appendChild(buttonContainer);
+                // Find the right insertion point - before any spacer/divider or right-aligned elements
+                // Look for elements that are NOT buttons (likely spacers) or elements with specific classes
+                let insertBeforeElement = null;
+                for (let i = 0; i < actionsSection.children.length; i++) {
+                    const child = actionsSection.children[i];
+                    // If it's not a button, it's likely a spacer - insert before it
+                    if (child.tagName !== 'BUTTON') {
+                        insertBeforeElement = child;
+                        console.log(`Found non-button element at index ${i}, will insert before it`);
+                        break;
+                    }
+                }
+                
+                if (insertBeforeElement) {
+                    console.log("Inserting button before spacer/divider element");
+                    actionsSection.insertBefore(button, insertBeforeElement);
+                } else {
+                    console.log("No spacer found, appending to end of actions section");
+                    actionsSection.appendChild(button);
+                }
                 
                 console.log("Button injected successfully!");
                 
