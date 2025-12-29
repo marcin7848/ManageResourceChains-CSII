@@ -4,7 +4,7 @@ import { useValue } from "cs2/api";
 import { bindValue } from "cs2/api";
 import { useEffect } from "react";
 import { getModule } from "cs2/modding";
-import { PanelSection, PanelSectionRow } from "cs2/ui";
+import { PanelSection, PanelSectionRow, Portal } from "cs2/ui";
 
 // Import game UI styles like CompanyBrandChanger does
 const stylePanel = getModule("game-ui/common/panel/panel.module.scss", "classes");
@@ -18,18 +18,18 @@ const isBuildingSelected$ = bindValue<boolean>("manageResourceChains", "isBuildi
 const selectedBuildingEntity$ = bindValue<number>("manageResourceChains", "selectedBuildingEntity", 0);
 
 const BUTTON_CONTAINER_ID = 'manage-resource-chains-container';
-const PANEL_CONTAINER_ID = 'manage-resource-chains-panel-container';
 const ACTIONS_SECTION_CLASS = '.actions-section_X1x';
 
 // Management panel component that appears on the right side
 // Uses proper game UI module classes like CompanyBrandChanger
 const ManageResourceChainsPanel: React.FC<{ entityId: number; onClose: () => void }> = ({ entityId, onClose }) => {
     const [panelStyle, setPanelStyle] = useState<React.CSSProperties>({
-        position: 'fixed',
-        top: '100rem',
+        position: 'absolute',
+        top: 'calc(16rem + var(--floatingToggleSize))',
+        bottom: '6rem',
         right: '20rem',
         width: '400rem',
-        maxHeight: '80vh'
+        zIndex: 'calc(var(--tooltipIndex) - 1)' as any
     });
 
     useEffect(() => {
@@ -43,11 +43,14 @@ const ManageResourceChainsPanel: React.FC<{ entityId: number; onClose: () => voi
                 const maxHeight = wrapperElement?.offsetHeight ?? 1600;
                 
                 setPanelStyle({
-                    position: 'fixed',
+                    position: 'absolute',
                     left: `calc(${newPanelLeft}px + 20rem)`,
-                    top: '100rem',
+                    top: 'calc(16rem + var(--floatingToggleSize))',
+                    bottom: '6rem',
                     width: '400rem',
-                    maxHeight: `${maxHeight}px`
+                    maxHeight: `${maxHeight}px`,
+                    zIndex: 'calc(var(--tooltipIndex) - 1)' as any,
+                    overflow: 'hidden'
                 });
             }
         };
@@ -66,71 +69,69 @@ const ManageResourceChainsPanel: React.FC<{ entityId: number; onClose: () => voi
         });
 
         return () => observer.disconnect();
-    }, []);
+    }, [entityId]);
+
 
     return (
-        <div 
-            style={panelStyle}
-            className={stylePanel.panel}
-        >
-            <div className={styleDefault.header}>
-                <div className={stylePanel.titleBar}>
-                    <img
-                        className={stylePanel.icon}
-                        src="coui://uil/Colored/DeliveryVan.svg"
-                        alt="Manage Resource Chains"
-                    />
-                    <div className={styleDefault.title}>Manage Resource Chains</div>
-                    <button 
-                        className={`${styleCloseButton.button} ${stylePanel.closeButton}`}
-                        onClick={onClose}
-                    >
-                        <div 
-                            className={`${styleTintedIcon.tintedIcon} ${styleIcon.icon}`}
-                            style={{ 
-                                maskImage: 'url(Media/Glyphs/Close.svg)',
-                                WebkitMaskImage: 'url(Media/Glyphs/Close.svg)'
-                            }}
+        <Portal>
+            <div 
+                style={panelStyle}
+                className={stylePanel.panel}
+            >
+                <div className={styleDefault.header}>
+                    <div className={stylePanel.titleBar}>
+                        <img
+                            className={stylePanel.icon}
+                            src="coui://uil/Colored/DeliveryVan.svg"
+                            alt="Manage Resource Chains"
                         />
-                    </button>
+                        <div className={styleDefault.title}>Manage Resource Chains</div>
+                        <button 
+                            className={`${styleCloseButton.button} ${stylePanel.closeButton}`}
+                            onClick={onClose}
+                        >
+                            <div 
+                                className={`${styleTintedIcon.tintedIcon} ${styleIcon.icon}`}
+                                style={{ 
+                                    maskImage: 'url(Media/Glyphs/Close.svg)',
+                                    WebkitMaskImage: 'url(Media/Glyphs/Close.svg)'
+                                }}
+                            />
+                        </button>
+                    </div>
+                </div>
+                
+                <div className={styleDefault.content}>
+                    <PanelSection>
+                        <PanelSectionRow
+                            left="Entity ID:"
+                            right={entityId.toString()}
+                        />
+                        <PanelSectionRow
+                            left="Status:"
+                            right="Active"
+                        />
+                    </PanelSection>
+                    
+                    <PanelSection>
+                        <PanelSectionRow
+                            left="Resource Chains"
+                            right="Coming soon..."
+                        />
+                    </PanelSection>
                 </div>
             </div>
-            
-            <div className={styleDefault.content}>
-                <PanelSection>
-                    <PanelSectionRow
-                        left="Entity ID:"
-                        right={entityId.toString()}
-                    />
-                    <PanelSectionRow
-                        left="Status:"
-                        right="Active"
-                    />
-                </PanelSection>
-                
-                <PanelSection>
-                    <PanelSectionRow
-                        left="Resource Chains"
-                        right="Coming soon..."
-                    />
-                </PanelSection>
-            </div>
-        </div>
+        </Portal>
     );
 };
 
 // The actual button component using React/JSX (like FirstPersonCamera)
-const ManageResourceChainsButton: React.FC<{ entityId: number; onOpenPanel: () => void }> = ({ entityId, onOpenPanel }) => {
-    const handleClick = () => {
-        console.log("Manage Resource Chains clicked for entity:", entityId);
-        onOpenPanel();
-    };
-
+const ManageResourceChainsButton: React.FC<{ onOpenPanel: () => void }> = ({ onOpenPanel }) => {
     return (
         <button
             style={{ marginLeft: '6rem', marginRight: '8rem' }}
             className="button_Z9O button_ECf item_It6 item-mouse-states_Fmi item-selected_tAM item-focused_FuT button_xGY"
-            onClick={handleClick}
+            onClick={onOpenPanel}
         >
             <img 
                 className="icon_Tdt icon_soN icon_Iwk" 
@@ -156,29 +157,12 @@ export const BuildingButton = () => {
         setIsPanelOpen(false);
     };
 
-    // Render the panel in the document body when open
+    // Close panel when building is deselected
     useEffect(() => {
-        if (isPanelOpen && selectedBuildingEntity !== 0) {
-            const panelRoot = document.createElement('div');
-            panelRoot.id = PANEL_CONTAINER_ID;
-            document.body.appendChild(panelRoot);
-
-            ReactDOM.render(
-                <ManageResourceChainsPanel 
-                    entityId={selectedBuildingEntity} 
-                    onClose={handleClosePanel}
-                />,
-                panelRoot
-            );
-
-            return () => {
-                ReactDOM.unmountComponentAtNode(panelRoot);
-                if (panelRoot.parentNode) {
-                    panelRoot.parentNode.removeChild(panelRoot);
-                }
-            };
+        if (!isBuildingSelected || selectedBuildingEntity === 0) {
+            setIsPanelOpen(false);
         }
-    }, [isPanelOpen, selectedBuildingEntity]);
+    }, [isBuildingSelected, selectedBuildingEntity]);
 
     // Handle button injection
     useEffect(() => {
@@ -189,8 +173,6 @@ export const BuildingButton = () => {
                 ReactDOM.unmountComponentAtNode(container);
                 container.remove();
             }
-            // Close panel when building is deselected
-            setIsPanelOpen(false);
             return;
         }
 
@@ -236,7 +218,6 @@ export const BuildingButton = () => {
             // Render the React component into the container (like FirstPersonCamera)
             ReactDOM.render(
                 <ManageResourceChainsButton 
-                    entityId={selectedBuildingEntity} 
                     onOpenPanel={handleOpenPanel}
                 />,
                 container
@@ -271,7 +252,16 @@ export const BuildingButton = () => {
         };
     }, [isBuildingSelected, selectedBuildingEntity]);
 
-    // This component doesn't render anything itself - it injects into the DOM
-    return null;
+    // Render the panel directly when open (like CompanyBrandChanger does)
+    return (
+        <>
+            {isPanelOpen && selectedBuildingEntity !== 0 && (
+                <ManageResourceChainsPanel 
+                    entityId={selectedBuildingEntity} 
+                    onClose={handleClosePanel}
+                />
+            )}
+        </>
+    );
 };
 
