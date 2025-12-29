@@ -3,6 +3,15 @@ import ReactDOM from "react-dom";
 import { useValue } from "cs2/api";
 import { bindValue } from "cs2/api";
 import { useEffect } from "react";
+import { getModule } from "cs2/modding";
+import { PanelSection, PanelSectionRow } from "cs2/ui";
+
+// Import game UI styles like CompanyBrandChanger does
+const stylePanel = getModule("game-ui/common/panel/panel.module.scss", "classes");
+const styleDefault = getModule("game-ui/common/panel/themes/default.module.scss", "classes");
+const styleIcon = getModule("game-ui/common/input/button/icon-button.module.scss", "classes");
+const styleTintedIcon = getModule("game-ui/common/image/tinted-icon.module.scss", "classes");
+const styleCloseButton = getModule("game-ui/common/input/button/themes/round-highlight-button.module.scss", "classes");
 
 // Bindings to our C# system
 const isBuildingSelected$ = bindValue<boolean>("manageResourceChains", "isBuildingSelected", false);
@@ -13,7 +22,7 @@ const PANEL_CONTAINER_ID = 'manage-resource-chains-panel-container';
 const ACTIONS_SECTION_CLASS = '.actions-section_X1x';
 
 // Management panel component that appears on the right side
-// Uses the same panel classes as FirstPersonCamera and other game UI panels
+// Uses proper game UI module classes like CompanyBrandChanger
 const ManageResourceChainsPanel: React.FC<{ entityId: number; onClose: () => void }> = ({ entityId, onClose }) => {
     return (
         <div 
@@ -24,73 +33,44 @@ const ManageResourceChainsPanel: React.FC<{ entityId: number; onClose: () => voi
                 width: '400rem',
                 maxHeight: '80vh'
             }}
-            className="panel_YqS expanded"
+            className={stylePanel.panel}
         >
-            <div className="header_H_U header_Bpo header_xQg">
-                <div className="title-bar_RFC" style={{ 
-                    display: 'flex', 
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    position: 'relative'
-                }}>
-                    <div className="title_SVH title_zQN">
-                        Manage Resource Chains
-                    </div>
+            <div className={styleDefault.header}>
+                <div className={stylePanel.titleBar}>
+                    <div className={styleDefault.title}>Manage Resource Chains</div>
                     <button 
-                        className="button_s2g button_ECf close-button_wKK"
+                        className={`${styleCloseButton.button} ${stylePanel.closeButton}`}
                         onClick={onClose}
-                        style={{
-                            position: 'absolute',
-                            right: 0,
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center'
-                        }}
                     >
-                        <div className="tinted-icon_iKo" style={{ 
-                            maskImage: 'url(coui://uil/Standard/XClose.svg)',
-                            WebkitMaskImage: 'url(coui://uil/Standard/XClose.svg)',
-                            width: '16rem',
-                            height: '16rem',
-                            backgroundColor: 'white'
-                        }}></div>
+                        <div 
+                            className={`${styleTintedIcon.tintedIcon} ${styleIcon.icon}`}
+                            style={{ 
+                                maskImage: 'url(Media/Glyphs/Close.svg)',
+                                WebkitMaskImage: 'url(Media/Glyphs/Close.svg)'
+                            }}
+                        />
                     </button>
                 </div>
             </div>
             
-            <div className="content_XD5 content_AD7 child-opacity-transition_nkS">
-                <div className="scrollable_DXr y_SMM scrollable_wt8">
-                    <div className="content_gqa">
-                        <div className="infoview-panel-section_RXJ">
-                            <div className="labels_L7Q">
-                                <div className="label_l_4 label_uCB uppercase_RJI">Entity Information</div>
-                            </div>
-                            <div className="content_1xS">
-                                <div className="row_S2v">
-                                    <div className="left_Yja row_S2v">Entity ID:</div>
-                                    <div className="right_k3O row_S2v">{entityId}</div>
-                                </div>
-                                <div className="row_S2v">
-                                    <div className="left_Yja row_S2v">Status:</div>
-                                    <div className="right_k3O row_S2v">Active</div>
-                                </div>
-                            </div>
-                        </div>
-                        
-                        <div className="infoview-panel-section_RXJ" style={{ marginTop: '10rem' }}>
-                            <div className="labels_L7Q">
-                                <div className="label_l_4 label_uCB uppercase_RJI">Resource Chains</div>
-                            </div>
-                            <div className="content_1xS">
-                                <div className="row_S2v">
-                                    <div className="left_Yja row_S2v" style={{ color: 'rgba(255, 255, 255, 0.7)' }}>
-                                        Resource chain management coming soon...
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
+            <div className={styleDefault.content}>
+                <PanelSection>
+                    <PanelSectionRow
+                        left="Entity ID:"
+                        right={entityId.toString()}
+                    />
+                    <PanelSectionRow
+                        left="Status:"
+                        right="Active"
+                    />
+                </PanelSection>
+                
+                <PanelSection>
+                    <PanelSectionRow
+                        left="Resource Chains"
+                        right="Coming soon..."
+                    />
+                </PanelSection>
             </div>
         </div>
     );
