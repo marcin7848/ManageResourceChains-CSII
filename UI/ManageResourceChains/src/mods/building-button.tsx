@@ -24,19 +24,62 @@ const ACTIONS_SECTION_CLASS = '.actions-section_X1x';
 // Management panel component that appears on the right side
 // Uses proper game UI module classes like CompanyBrandChanger
 const ManageResourceChainsPanel: React.FC<{ entityId: number; onClose: () => void }> = ({ entityId, onClose }) => {
+    const [panelStyle, setPanelStyle] = useState<React.CSSProperties>({
+        position: 'fixed',
+        top: '100rem',
+        right: '20rem',
+        width: '400rem',
+        maxHeight: '80vh'
+    });
+
+    useEffect(() => {
+        const calculatePosition = () => {
+            // Find the building info panel (selected-info-panel)
+            const sipElement = document.querySelector('.selected-info-panel_gG8') as HTMLElement | null;
+            const wrapperElement = document.querySelector('.info-layout_BVk') as HTMLElement | null;
+            
+            if (sipElement && sipElement.offsetWidth > 0) {
+                const newPanelLeft = sipElement.offsetLeft + sipElement.offsetWidth;
+                const maxHeight = wrapperElement?.offsetHeight ?? 1600;
+                
+                setPanelStyle({
+                    position: 'fixed',
+                    left: `calc(${newPanelLeft}px + 20rem)`,
+                    top: '100rem',
+                    width: '400rem',
+                    maxHeight: `${maxHeight}px`
+                });
+            }
+        };
+
+        // Calculate immediately
+        calculatePosition();
+
+        // Observe DOM changes to recalculate position
+        const observer = new MutationObserver(() => {
+            calculatePosition();
+        });
+
+        observer.observe(document.body, {
+            childList: true,
+            subtree: true
+        });
+
+        return () => observer.disconnect();
+    }, []);
+
     return (
         <div 
-            style={{ 
-                position: 'fixed',
-                top: '100rem',
-                right: '20rem',
-                width: '400rem',
-                maxHeight: '80vh'
-            }}
+            style={panelStyle}
             className={stylePanel.panel}
         >
             <div className={styleDefault.header}>
                 <div className={stylePanel.titleBar}>
+                    <img
+                        className={stylePanel.icon}
+                        src="coui://uil/Colored/DeliveryVan.svg"
+                        alt="Manage Resource Chains"
+                    />
                     <div className={styleDefault.title}>Manage Resource Chains</div>
                     <button 
                         className={`${styleCloseButton.button} ${stylePanel.closeButton}`}
