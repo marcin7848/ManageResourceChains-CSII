@@ -13,71 +13,67 @@ const PANEL_CONTAINER_ID = 'manage-resource-chains-panel-container';
 const ACTIONS_SECTION_CLASS = '.actions-section_X1x';
 
 // Management panel component that appears on the right side
+// Uses the same panel classes as FirstPersonCamera and other game UI panels
 const ManageResourceChainsPanel: React.FC<{ entityId: number; onClose: () => void }> = ({ entityId, onClose }) => {
     return (
         <div 
-            style={{
+            style={{ 
                 position: 'fixed',
                 top: '100rem',
                 right: '20rem',
                 width: '400rem',
-                backgroundColor: 'rgba(0, 0, 0, 0.85)',
-                border: '2rem solid rgba(255, 255, 255, 0.2)',
-                borderRadius: '4rem',
-                padding: '20rem',
-                zIndex: 10000,
-                color: 'white',
-                fontFamily: 'sans-serif'
+                maxHeight: '80vh'
             }}
-            className="panel_YqS"
+            className="panel_YqS expanded"
         >
-            {/* Header with title and close button */}
-            <div style={{ 
-                display: 'flex', 
-                justifyContent: 'space-between', 
-                alignItems: 'center',
-                marginBottom: '15rem',
-                borderBottom: '1rem solid rgba(255, 255, 255, 0.2)',
-                paddingBottom: '10rem'
-            }}>
-                <h2 style={{ 
-                    margin: 0, 
-                    fontSize: '18rem',
-                    fontWeight: 'bold'
-                }}>
-                    Manage Resource Chains
-                </h2>
-                <button
-                    onClick={onClose}
-                    style={{
-                        background: 'rgba(255, 255, 255, 0.1)',
-                        border: '1rem solid rgba(255, 255, 255, 0.3)',
-                        borderRadius: '3rem',
-                        color: 'white',
-                        fontSize: '16rem',
-                        fontWeight: 'bold',
-                        width: '30rem',
-                        height: '30rem',
-                        cursor: 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        padding: 0
-                    }}
-                    className="button_ECf item-mouse-states_Fmi"
-                >
-                    ×
-                </button>
+            <div className="header_H_U header_Bpo header_xQg">
+                <div className="title-bar_RFC">
+                    <div className="title_SVH title_zQN">Manage Resource Chains</div>
+                    <button 
+                        className="button_s2g button_ECf close-button_wKK"
+                        onClick={onClose}
+                    >
+                        <div className="tinted-icon_iKo" style={{ 
+                            maskImage: 'url(coui://uil/Standard/XClose.svg)',
+                            WebkitMaskImage: 'url(coui://uil/Standard/XClose.svg)'
+                        }}></div>
+                    </button>
+                </div>
             </div>
-
-            {/* Panel content */}
-            <div style={{ padding: '10rem 0' }}>
-                <p style={{ margin: '0 0 10rem 0', fontSize: '14rem' }}>
-                    Entity ID: {entityId}
-                </p>
-                <p style={{ margin: 0, fontSize: '14rem', color: 'rgba(255, 255, 255, 0.7)' }}>
-                    Resource chain management coming soon...
-                </p>
+            
+            <div className="content_XD5 content_AD7 child-opacity-transition_nkS">
+                <div className="scrollable_DXr y_SMM scrollable_wt8">
+                    <div className="content_gqa">
+                        <div className="infoview-panel-section_RXJ">
+                            <div className="labels_L7Q">
+                                <div className="label_l_4 label_uCB uppercase_RJI">Entity Information</div>
+                            </div>
+                            <div className="content_1xS">
+                                <div className="row_S2v">
+                                    <div className="left_Yja row_S2v">Entity ID:</div>
+                                    <div className="right_k3O row_S2v">{entityId}</div>
+                                </div>
+                                <div className="row_S2v">
+                                    <div className="left_Yja row_S2v">Status:</div>
+                                    <div className="right_k3O row_S2v">Active</div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div className="infoview-panel-section_RXJ" style={{ marginTop: '10rem' }}>
+                            <div className="labels_L7Q">
+                                <div className="label_l_4 label_uCB uppercase_RJI">Resource Chains</div>
+                            </div>
+                            <div className="content_1xS">
+                                <div className="row_S2v">
+                                    <div className="left_Yja row_S2v" style={{ color: 'rgba(255, 255, 255, 0.7)' }}>
+                                        Resource chain management coming soon...
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
     );
