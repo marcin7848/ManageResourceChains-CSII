@@ -27,15 +27,32 @@ const ManageResourceChainsPanel: React.FC<{ entityId: number; onClose: () => voi
             className="panel_YqS expanded"
         >
             <div className="header_H_U header_Bpo header_xQg">
-                <div className="title-bar_RFC">
-                    <div className="title_SVH title_zQN">Manage Resource Chains</div>
+                <div className="title-bar_RFC" style={{ 
+                    display: 'flex', 
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    position: 'relative'
+                }}>
+                    <div className="title_SVH title_zQN">
+                        Manage Resource Chains
+                    </div>
                     <button 
                         className="button_s2g button_ECf close-button_wKK"
                         onClick={onClose}
+                        style={{
+                            position: 'absolute',
+                            right: 0,
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center'
+                        }}
                     >
                         <div className="tinted-icon_iKo" style={{ 
                             maskImage: 'url(coui://uil/Standard/XClose.svg)',
-                            WebkitMaskImage: 'url(coui://uil/Standard/XClose.svg)'
+                            WebkitMaskImage: 'url(coui://uil/Standard/XClose.svg)',
+                            width: '16rem',
+                            height: '16rem',
+                            backgroundColor: 'white'
                         }}></div>
                     </button>
                 </div>
