@@ -4,6 +4,8 @@ using System.IO;
 using System.Linq;
 using Colossal.UI.Binding;
 using Game.UI;
+using Game.Tools;
+using Unity.Entities;
 using Newtonsoft.Json;
 
 namespace ManageResourceChains.Systems
@@ -18,14 +20,28 @@ namespace ManageResourceChains.Systems
         
         // Bindings
         private ValueBinding<string> _resourceChainConfigBinding;
+        private ValueBinding<bool> _buildingPickerActiveBinding;
+        
+        // Tool systems
+        private BuildingPickerToolSystem _buildingPickerToolSystem;
+        private ToolSystem _toolSystem;
+        
+        // State for tracking building picker
+        private string _currentRuleId;
+        private int _currentBuildingEntityId;
         
         protected override void OnCreate()
         {
             base.OnCreate();
             Mod.log.Info("ResourceChainManagementSystem created");
             
+            // Get tool systems
+            _buildingPickerToolSystem = World.GetOrCreateSystemManaged<BuildingPickerToolSystem>();
+            _toolSystem = World.GetOrCreateSystemManaged<ToolSystem>();
+            
             // Add binding to send configuration data to UI
             AddBinding(_resourceChainConfigBinding = new ValueBinding<string>("manageResourceChains", "resourceChainConfig", "{}"));
+            AddBinding(_buildingPickerActiveBinding = new ValueBinding<bool>("manageResourceChains", "buildingPickerActive", false));
             
             // Add method bindings for UI to call
             AddBinding(new TriggerBinding<int>("manageResourceChains", "requestBuildingConfig", RequestBuildingConfig));
@@ -33,6 +49,11 @@ namespace ManageResourceChains.Systems
             AddBinding(new TriggerBinding<int, string>("manageResourceChains", "addResourceChainRule", AddResourceChainRule));
             AddBinding(new TriggerBinding<int, string>("manageResourceChains", "removeResourceChainRule", RemoveResourceChainRule));
             AddBinding(new TriggerBinding<int, string, string>("manageResourceChains", "updateResourceChainRule", UpdateResourceChainRule));
+            
+            // Building picker tool bindings
+            AddBinding(new TriggerBinding<int, string>("manageResourceChains", "startBuildingPicker", StartBuildingPicker));
+            AddBinding(new TriggerBinding("manageResourceChains", "confirmBuildingPicker", ConfirmBuildingPicker));
+            AddBinding(new TriggerBinding("manageResourceChains", "cancelBuildingPicker", CancelBuildingPicker));
             
             // Load configurations from file
             LoadConfigurations();
@@ -251,8 +272,131 @@ namespace ManageResourceChains.Systems
         }
 
         /// <summary>
-        /// Get configuration for a specific building (can be called from other systems)
+        /// Start building picker tool
         /// </summary>
+        private void StartBuildingPicker(int buildingEntityId, string ruleId)
+        {
+            try
+            {
+                Mod.log.Info($"Starting building picker for building {buildingEntityId}, rule {ruleId}");
+                _currentBuildingEntityId = buildingEntityId;
+                _currentRuleId = ruleId;
+                
+                // Activate the building picker tool
+                _toolSystem.activeTool = _buildingPickerToolSystem;
+                _buildingPickerActiveBinding.Update(true);
+                
+                Mod.log.Info("Building picker tool activated");
+            }
+            catch (Exception ex)
+            {
+                Mod.log.Error($"Error starting building picker: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Confirm building picker selection
+        /// </summary>
+        public void ConfirmBuildingPicker()
+        {
+            try
+            {
+                Mod.log.Info("Confirming building picker selection");
+                
+                // Get selected buildings
+                var selectedBuildings = _buildingPickerToolSystem.SelectedBuildings;
+                Mod.log.Info($"Selected {selectedBuildings.Length} buildings");
+                
+                // Ensure config exists for this building
+                if (!_buildingConfigurations.TryGetValue(_currentBuildingEntityId, out var config))
+                {
+                    Mod.log.Info($"Creating new config for building {_currentBuildingEntityId}");
+                    config = new Data.BuildingConfiguration
+                    {
+                        BuildingEntityId = _currentBuildingEntityId,
+                        Rules = new List<Data.ResourceChainRule>()
+                    };
+                    _buildingConfigurations[_currentBuildingEntityId] = config;
+                }
+                
+                // Find or create the rule
+                var rule = config.Rules.FirstOrDefault(r => r.Id == _currentRuleId);
+                if (rule == null)
+                {
+                    Mod.log.Info($"Rule {_currentRuleId} not found in config, creating new rule");
+                    rule = new Data.ResourceChainRule
+                    {
+                        Id = _currentRuleId,
+                        Color = "#FF0000",
+                        Type = Data.ChainType.Incoming,
+                        Allow = Data.AllowType.Allow,
+                        TransportType = Data.TransportType.Resources,
+                        Buildings = new List<int>(),
+                        Districts = new List<int>(),
+                        TransportPriorities = new List<Data.TransportPriority>()
+                    };
+                    config.Rules.Add(rule);
+                }
+                
+                // Add buildings to the rule
+                Mod.log.Info($"Adding {selectedBuildings.Length} buildings to rule {_currentRuleId}");
+                for (int i = 0; i < selectedBuildings.Length; i++)
+                {
+                    int buildingId = selectedBuildings[i].Index;
+                    if (!rule.Buildings.Contains(buildingId))
+                    {
+                        rule.Buildings.Add(buildingId);
+                        Mod.log.Info($"✓ Added building {buildingId} to rule");
+                    }
+                    else
+                    {
+                        Mod.log.Info($"Building {buildingId} already in rule, skipping");
+                    }
+                }
+                
+                Mod.log.Info($"Rule now has {rule.Buildings.Count} total buildings");
+                
+                // Send updated config to UI
+                string json = JsonConvert.SerializeObject(config, Formatting.Indented);
+                Mod.log.Info($"Sending updated config to UI: {json}");
+                _resourceChainConfigBinding.Update(json);
+                
+                SaveConfigurations();
+                
+                // Deactivate tool
+                _buildingPickerToolSystem.ConfirmSelection();
+                _buildingPickerActiveBinding.Update(false);
+                
+                Mod.log.Info("Building picker confirmed and config updated");
+            }
+            catch (Exception ex)
+            {
+                Mod.log.Error($"Error confirming building picker: {ex.Message}");
+                Mod.log.Error($"Stack trace: {ex.StackTrace}");
+            }
+        }
+
+        /// <summary>
+        /// Cancel building picker selection
+        /// </summary>
+        public void CancelBuildingPicker()
+        {
+            try
+            {
+                Mod.log.Info("Cancelling building picker");
+                
+                // Deactivate tool
+                _buildingPickerToolSystem.CancelSelection();
+                _buildingPickerActiveBinding.Update(false);
+                
+                Mod.log.Info("Building picker cancelled");
+            }
+            catch (Exception ex)
+            {
+                Mod.log.Error($"Error cancelling building picker: {ex.Message}");
+            }
+        }
+
         public static Data.BuildingConfiguration GetBuildingConfiguration(int buildingEntityId)
         {
             if (_buildingConfigurations.ContainsKey(buildingEntityId))

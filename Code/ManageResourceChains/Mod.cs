@@ -13,6 +13,14 @@ namespace ManageResourceChains
     {
         public static ILog log = LogManager.GetLogger($"{nameof(ManageResourceChains)}.{nameof(Mod)}")
             .SetShowsErrorsInUI(false);
+        
+        public static ILog Log => log;
+
+        // Input action constants for building picker tool
+        public const string kToolConfirmAction = "Tool Confirm";
+        public const string kToolCancelAction = "Tool Cancel";
+
+        public static Setting Settings { get; private set; }
 
         private Setting m_Setting;
 
@@ -27,6 +35,7 @@ namespace ManageResourceChains
 
                 m_Setting = new Setting(this);
                 m_Setting.RegisterInOptionsUI();
+                Settings = m_Setting;
                 GameManager.instance.localizationManager.AddSource("en-US", new LocaleEN(m_Setting));
 
                 AssetDatabase.global.LoadSettings(nameof(ManageResourceChains), m_Setting, new Setting(this));
@@ -39,6 +48,11 @@ namespace ManageResourceChains
                 log.Info("Registering ResourceChainManagementSystem...");
                 updateSystem.UpdateAt<ResourceChainManagementSystem>(SystemUpdatePhase.UIUpdate);
                 log.Info("ResourceChainManagementSystem registered!");
+                
+                // Register building picker tool
+                log.Info("Registering BuildingPickerToolSystem...");
+                updateSystem.UpdateAt<BuildingPickerToolSystem>(SystemUpdatePhase.ToolUpdate);
+                log.Info("BuildingPickerToolSystem registered!");
             }
             catch (System.Exception ex)
             {

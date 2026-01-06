@@ -36,6 +36,7 @@ const styleDropdown = getModule("game-ui/menu/themes/dropdown.module.scss", "cla
 const isBuildingSelected$ = bindValue<boolean>("manageResourceChains", "isBuildingSelected", false);
 const selectedBuildingEntity$ = bindValue<number>("manageResourceChains", "selectedBuildingEntity", 0);
 const resourceChainConfig$ = bindValue<string>("manageResourceChains", "resourceChainConfig", "{}");
+const buildingPickerActive$ = bindValue<boolean>("manageResourceChains", "buildingPickerActive", false);
 
 const BUTTON_CONTAINER_ID = 'manage-resource-chains-container';
 const ACTIONS_SECTION_CLASS = '.actions-section_X1x';
@@ -69,6 +70,39 @@ const ResourceChainRuleComponent: React.FC<{
 }> = ({ rule, entityId, onUpdate, onDelete }) => {
     
     console.log("ResourceChainRuleComponent rendering, rule.id:", rule?.id);
+    
+    const buildingPickerActive = useValue(buildingPickerActive$);
+    const [isPickingBuildings, setIsPickingBuildings] = useState(false);
+    
+    // Sync local state with global binding
+    useEffect(() => {
+        if (!buildingPickerActive && isPickingBuildings) {
+            setIsPickingBuildings(false);
+        }
+    }, [buildingPickerActive, isPickingBuildings]);
+    
+    const startBuildingPicker = () => {
+        console.log("🎯 Starting building picker for rule:", rule.id);
+        console.log("🎯 Current isPickingBuildings:", isPickingBuildings);
+        console.log("🎯 Current buildingPickerActive:", buildingPickerActive);
+        console.log("🎯 Set isPickingBuildings to true");
+        setIsPickingBuildings(true);
+        console.log("🎯 Triggering C# startBuildingPicker with entityId:", entityId, "ruleId:", rule.id);
+        trigger("manageResourceChains", "startBuildingPicker", entityId, rule.id);
+        console.log("🎯 C# trigger sent");
+    };
+
+    const confirmBuildingPicker = () => {
+        console.log("✅ Confirming building picker");
+        setIsPickingBuildings(false);
+        trigger("manageResourceChains", "confirmBuildingPicker");
+    };
+
+    const cancelBuildingPicker = () => {
+        console.log("❌ Cancelling building picker");
+        setIsPickingBuildings(false);
+        trigger("manageResourceChains", "cancelBuildingPicker");
+    };
     
     return (
         <div style={{ 
@@ -260,18 +294,56 @@ const ResourceChainRuleComponent: React.FC<{
                         <span>Buildings / Districts</span>
                         <div style={{ display: 'flex', gap: '8rem' }}>
                             <button
+                                onClick={startBuildingPicker}
                                 style={{
                                     padding: '2rem 6rem',
-                                    backgroundColor: 'rgba(0,150,255,0.3)',
-                                    border: '1px solid rgba(0,150,255,0.5)',
+                                    backgroundColor: isPickingBuildings ? 'rgba(255,165,0,0.5)' : 'rgba(0,150,255,0.3)',
+                                    border: `1px solid ${isPickingBuildings ? 'rgba(255,165,0,0.8)' : 'rgba(0,150,255,0.5)'}`,
                                     borderRadius: '2rem',
                                     color: 'white',
                                     cursor: 'pointer',
                                     fontSize: '10rem'
                                 }}
+                                title={isPickingBuildings ? 'Click buildings, then click Done' : 'Add buildings to this rule'}
+                                disabled={isPickingBuildings}
                             >
-                                + Building
+                                {isPickingBuildings ? '🎯 Picking...' : '+ Building'}
                             </button>
+                            {isPickingBuildings && (
+                                <>
+                                    <button
+                                        onClick={confirmBuildingPicker}
+                                        style={{
+                                            padding: '2rem 6rem',
+                                            backgroundColor: 'rgba(0,255,0,0.3)',
+                                            border: '1px solid rgba(0,255,0,0.5)',
+                                            borderRadius: '2rem',
+                                            color: 'white',
+                                            cursor: 'pointer',
+                                            fontSize: '10rem',
+                                            fontWeight: 'bold'
+                                        }}
+                                        title="Confirm selection and restore panel"
+                                    >
+                                        ✅ Done
+                                    </button>
+                                    <button
+                                        onClick={cancelBuildingPicker}
+                                        style={{
+                                            padding: '2rem 6rem',
+                                            backgroundColor: 'rgba(255,0,0,0.3)',
+                                            border: '1px solid rgba(255,0,0,0.5)',
+                                            borderRadius: '2rem',
+                                            color: 'white',
+                                            cursor: 'pointer',
+                                            fontSize: '10rem'
+                                        }}
+                                        title="Cancel selection and restore panel"
+                                    >
+                                        ❌ Cancel
+                                    </button>
+                                </>
+                            )}
                             <button
                                 style={{
                                     padding: '2rem 6rem',
@@ -282,6 +354,7 @@ const ResourceChainRuleComponent: React.FC<{
                                     cursor: 'pointer',
                                     fontSize: '10rem'
                                 }}
+                                disabled={isPickingBuildings}
                             >
                                 + District
                             </button>
@@ -293,6 +366,7 @@ const ResourceChainRuleComponent: React.FC<{
                         <div key={idx} style={{ 
                             display: 'flex', 
                             justifyContent: 'space-between',
+                            alignItems: 'center',
                             padding: '4rem',
                             marginBottom: '4rem',
                             backgroundColor: 'rgba(0,0,0,0.2)',
@@ -301,17 +375,30 @@ const ResourceChainRuleComponent: React.FC<{
                         }}>
                             <span>Building {building}</span>
                             <button
-                                style={{
-                                    padding: '2rem 6rem',
-                                    backgroundColor: 'rgba(255,0,0,0.3)',
-                                    border: '1px solid rgba(255,0,0,0.5)',
-                                    borderRadius: '2rem',
-                                    color: '#ff4444',
-                                    cursor: 'pointer',
-                                    fontSize: '10rem'
+                                onClick={() => {
+                                    console.log(`Removing building ${building} from rule ${rule.id}`);
+                                    const updatedBuildings = rule.buildings.filter((b) => b !== building);
+                                    onUpdate({ ...rule, buildings: updatedBuildings });
                                 }}
+                                style={{
+                                    padding: '2rem 4rem',
+                                    backgroundColor: 'transparent',
+                                    border: 'none',
+                                    cursor: 'pointer',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center'
+                                }}
+                                title="Remove building"
                             >
-                                -
+                                <img 
+                                    src="coui://uil/Colored/XClose.svg"
+                                    style={{
+                                        width: '16rem',
+                                        height: '16rem'
+                                    }}
+                                    alt="Remove"
+                                />
                             </button>
                         </div>
                     ))}
@@ -321,6 +408,7 @@ const ResourceChainRuleComponent: React.FC<{
                         <div key={idx} style={{ 
                             display: 'flex', 
                             justifyContent: 'space-between',
+                            alignItems: 'center',
                             padding: '4rem',
                             marginBottom: '4rem',
                             backgroundColor: 'rgba(0,0,0,0.2)',
@@ -329,17 +417,30 @@ const ResourceChainRuleComponent: React.FC<{
                         }}>
                             <span>District {district}</span>
                             <button
-                                style={{
-                                    padding: '2rem 6rem',
-                                    backgroundColor: 'rgba(255,0,0,0.3)',
-                                    border: '1px solid rgba(255,0,0,0.5)',
-                                    borderRadius: '2rem',
-                                    color: '#ff4444',
-                                    cursor: 'pointer',
-                                    fontSize: '10rem'
+                                onClick={() => {
+                                    console.log(`Removing district ${district} from rule ${rule.id}`);
+                                    const updatedDistricts = rule.districts.filter((d) => d !== district);
+                                    onUpdate({ ...rule, districts: updatedDistricts });
                                 }}
+                                style={{
+                                    padding: '2rem 4rem',
+                                    backgroundColor: 'transparent',
+                                    border: 'none',
+                                    cursor: 'pointer',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center'
+                                }}
+                                title="Remove district"
                             >
-                                -
+                                <img 
+                                    src="coui://uil/Colored/XClose.svg"
+                                    style={{
+                                        width: '16rem',
+                                        height: '16rem'
+                                    }}
+                                    alt="Remove"
+                                />
                             </button>
                         </div>
                     ))}
@@ -392,6 +493,7 @@ const ResourceChainRuleComponent: React.FC<{
                         <div key={idx} style={{ 
                             display: 'flex', 
                             justifyContent: 'space-between',
+                            alignItems: 'center',
                             padding: '4rem',
                             marginBottom: '4rem',
                             backgroundColor: 'rgba(0,0,0,0.2)',
@@ -400,17 +502,30 @@ const ResourceChainRuleComponent: React.FC<{
                         }}>
                             <span>Priority {priority.priority}</span>
                             <button
-                                style={{
-                                    padding: '2rem 6rem',
-                                    backgroundColor: 'rgba(255,0,0,0.3)',
-                                    border: '1px solid rgba(255,0,0,0.5)',
-                                    borderRadius: '2rem',
-                                    color: '#ff4444',
-                                    cursor: 'pointer',
-                                    fontSize: '10rem'
+                                onClick={() => {
+                                    console.log(`Removing transport priority ${priority.id} from rule ${rule.id}`);
+                                    const updatedPriorities = rule.transportPriorities.filter((p) => p.id !== priority.id);
+                                    onUpdate({ ...rule, transportPriorities: updatedPriorities });
                                 }}
+                                style={{
+                                    padding: '2rem 4rem',
+                                    backgroundColor: 'transparent',
+                                    border: 'none',
+                                    cursor: 'pointer',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center'
+                                }}
+                                title="Remove transport priority"
                             >
-                                -
+                                <img 
+                                    src="coui://uil/Colored/XClose.svg"
+                                    style={{
+                                        width: '16rem',
+                                        height: '16rem'
+                                    }}
+                                    alt="Remove"
+                                />
                             </button>
                         </div>
                     ))}
@@ -435,10 +550,16 @@ const ResourceChainRuleComponent: React.FC<{
 // Uses proper game UI module classes like CompanyBrandChanger
 const ManageResourceChainsPanel: React.FC<{ entityId: number; onClose: () => void }> = ({ entityId, onClose }) => {
     const configJson = useValue(resourceChainConfig$);
+    const buildingPickerActive = useValue(buildingPickerActive$);
     const [config, setConfig] = useState<BuildingConfiguration | null>(null);
     const [isLoading, setIsLoading] = useState<boolean>(true);
+    
+    // Debug: Log when buildingPickerActive changes
+    useEffect(() => {
+        console.log("🔍 Panel: buildingPickerActive changed to:", buildingPickerActive);
+    }, [buildingPickerActive]);
 
-    // ...existing useEffects...
+
 
     useEffect(() => {
         // Request config when entity changes
@@ -657,28 +778,30 @@ const ManageResourceChainsPanel: React.FC<{ entityId: number; onClose: () => voi
 
     return (
         <>
-            <Panel
-                header={(
-                    <div style={{ display: 'flex', alignItems: 'center', padding: '0 10rem' }}>
-                        <img
-                            style={{ width: '24rem', height: '24rem', marginRight: '8rem' }}
-                            src="coui://uil/Colored/DeliveryVan.svg"
-                            alt="Manage Resource Chains"
-                        />
-                        <span>Manage Resource Chains</span>
-                    </div>
-                )}
-                onClose={onClose}
-                className="manage-resource-chains-panel"
-                style={{
-                    position: 'absolute',
-                    top: 'calc(16rem + var(--floatingToggleSize))',
-                    right: '20rem',
-                    width: '450rem',
-                    maxHeight: 'calc(100vh - 100rem)'
-                }}
-            >
-                <Scrollable>
+            {/* Don't render panel when building picker is active - this allows raycasting to reach buildings */}
+            {!buildingPickerActive && (
+                <Panel
+                    header={(
+                        <div style={{ display: 'flex', alignItems: 'center', padding: '0 10rem' }}>
+                            <img
+                                style={{ width: '24rem', height: '24rem', marginRight: '8rem' }}
+                                src="coui://uil/Colored/DeliveryVan.svg"
+                                alt="Manage Resource Chains"
+                            />
+                            <span>Manage Resource Chains</span>
+                        </div>
+                    )}
+                    onClose={onClose}
+                    className="manage-resource-chains-panel"
+                    style={{
+                        position: 'absolute',
+                        top: 'calc(16rem + var(--floatingToggleSize))',
+                        right: '20rem',
+                        width: '450rem',
+                        maxHeight: 'calc(100vh - 100rem)'
+                    }}
+                >
+                    <Scrollable>
                     {isLoading ? (
                         <div style={{ padding: '20rem', textAlign: 'center', color: 'rgba(255,255,255,0.7)' }}>
                             Loading configuration...
@@ -780,6 +903,119 @@ const ManageResourceChainsPanel: React.FC<{ entityId: number; onClose: () => voi
                     )}
                 </Scrollable>
             </Panel>
+            )}
+            
+            {/* Floating control panel for building picker - rendered in Portal */}
+            {buildingPickerActive && (
+                <Portal>
+                    {/* Control panel - positioned at top center, pointer-events only on the panel itself */}
+                    <div 
+                        style={{
+                            position: 'fixed',
+                            top: '100rem',
+                            left: '50%',
+                            transform: 'translateX(-50%)',
+                            zIndex: 999999,
+                            backgroundColor: 'rgba(0, 0, 0, 0.95)',
+                            border: '3px solid rgba(255, 165, 0, 0.9)',
+                            borderRadius: '8rem',
+                            padding: '20rem 30rem',
+                            boxShadow: '0 8px 32px rgba(0, 0, 0, 0.8)',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: '15rem',
+                            alignItems: 'center',
+                            pointerEvents: 'auto',
+                            userSelect: 'none'
+                        }}
+                        onMouseDown={(e) => e.stopPropagation()}
+                        onMouseUp={(e) => e.stopPropagation()}
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                            <div style={{
+                                fontSize: '18rem',
+                                fontWeight: 'bold',
+                                color: '#FFA500',
+                                marginBottom: '5rem'
+                            }}>
+                                🎯 Building Picker Active
+                            </div>
+                            <div style={{
+                                fontSize: '14rem',
+                                color: 'rgba(255, 255, 255, 0.9)',
+                                textAlign: 'center',
+                                marginBottom: '10rem'
+                            }}>
+                                Click on buildings to select them<br />
+                                Then click Done or Cancel below
+                            </div>
+                            <div style={{
+                                display: 'flex',
+                                gap: '15rem'
+                            }}>
+                                <button
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        e.preventDefault();
+                                        console.log("✅ Done button clicked");
+                                        trigger("manageResourceChains", "confirmBuildingPicker");
+                                    }}
+                                    onMouseDown={(e) => {
+                                        e.stopPropagation();
+                                        e.preventDefault();
+                                    }}
+                                    onMouseUp={(e) => {
+                                        e.stopPropagation();
+                                        e.preventDefault();
+                                    }}
+                                    style={{
+                                        padding: '12rem 30rem',
+                                        backgroundColor: 'rgba(0, 255, 0, 0.4)',
+                                        border: '3px solid rgba(0, 255, 0, 0.8)',
+                                        borderRadius: '6rem',
+                                        color: 'white',
+                                        cursor: 'pointer',
+                                        fontSize: '16rem',
+                                        fontWeight: 'bold',
+                                        pointerEvents: 'auto',
+                                        userSelect: 'none'
+                                    }}
+                                >
+                                    ✅ Done
+                                </button>
+                                <button
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        e.preventDefault();
+                                        console.log("❌ Cancel button clicked");
+                                        trigger("manageResourceChains", "cancelBuildingPicker");
+                                    }}
+                                    onMouseDown={(e) => {
+                                        e.stopPropagation();
+                                        e.preventDefault();
+                                    }}
+                                    onMouseUp={(e) => {
+                                        e.stopPropagation();
+                                        e.preventDefault();
+                                    }}
+                                    style={{
+                                        padding: '12rem 30rem',
+                                        backgroundColor: 'rgba(255, 0, 0, 0.4)',
+                                        border: '3px solid rgba(255, 0, 0, 0.8)',
+                                        borderRadius: '6rem',
+                                        color: 'white',
+                                        cursor: 'pointer',
+                                        fontSize: '16rem',
+                                        pointerEvents: 'auto',
+                                        userSelect: 'none'
+                                    }}
+                                >
+                                    ❌ Cancel
+                                </button>
+                            </div>
+                        </div>
+                    </Portal>
+            )}
         </>
     );
 };
