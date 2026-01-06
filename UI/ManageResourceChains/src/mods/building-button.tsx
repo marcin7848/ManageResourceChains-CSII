@@ -3,7 +3,12 @@ import ReactDOM from "react-dom";
 import { useValue } from "cs2/api";
 import { bindValue, trigger } from "cs2/api";
 import { getModule } from "cs2/modding";
-import { Portal } from "cs2/ui";
+import { Portal, Dropdown, DropdownToggle, Panel, Scrollable } from "cs2/ui";
+
+// Get DropdownItem dynamically to avoid TypeScript type/value confusion
+// @ts-ignore
+const UI = require("cs2/ui");
+const DropdownItem = UI.DropdownItem || UI.DropdownItem$1;
 import { 
     ResourceChainRule, 
     BuildingConfiguration, 
@@ -20,6 +25,7 @@ const styleDefault = getModule("game-ui/common/panel/themes/default.module.scss"
 const styleIcon = getModule("game-ui/common/input/button/icon-button.module.scss", "classes");
 const styleTintedIcon = getModule("game-ui/common/image/tinted-icon.module.scss", "classes");
 const styleCloseButton = getModule("game-ui/common/input/button/themes/round-highlight-button.module.scss", "classes");
+const styleDropdown = getModule("game-ui/menu/themes/dropdown.module.scss", "classes");
 
 // Bindings to our C# system
 const isBuildingSelected$ = bindValue<boolean>("manageResourceChains", "isBuildingSelected", false);
@@ -29,71 +35,179 @@ const resourceChainConfig$ = bindValue<string>("manageResourceChains", "resource
 const BUTTON_CONTAINER_ID = 'manage-resource-chains-container';
 const ACTIONS_SECTION_CLASS = '.actions-section_X1x';
 
-// Completely static component - NO useEffect, parent handles editing
+// Compact component with inline dropdowns - always editable
 const ResourceChainRuleComponent: React.FC<{
     rule: ResourceChainRule;
     entityId: number;
     onUpdate: (rule: ResourceChainRule) => void;
     onDelete: () => void;
-    onEditClick: (ruleId: string) => void;
-}> = ({ rule, entityId, onUpdate, onDelete, onEditClick }) => {
+}> = ({ rule, entityId, onUpdate, onDelete }) => {
     
     console.log("ResourceChainRuleComponent rendering, rule.id:", rule?.id);
     
-    // Completely static display
+    // Compact layout with all dropdowns inline
     return (
         <div style={{ 
-            padding: '10rem', 
-            marginBottom: '10rem', 
+            padding: '8rem', 
+            marginBottom: '8rem', 
             border: '1px solid rgba(255,255,255,0.2)',
             borderRadius: '4rem',
             backgroundColor: 'rgba(0,0,0,0.2)'
         }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10rem' }}>
+            {/* Single row with all controls - wraps automatically */}
+            <div style={{ 
+                display: 'flex', 
+                alignItems: 'center', 
+                gap: '8rem', 
+                flexWrap: 'wrap'
+            }}>
+                {/* Color indicator */}
                 <div style={{ 
-                    width: '30rem', 
-                    height: '30rem', 
+                    width: '24rem', 
+                    height: '24rem', 
                     backgroundColor: rule?.color || '#FF0000',
                     border: '2px solid rgba(255,255,255,0.5)',
-                    borderRadius: '4rem'
+                    borderRadius: '3rem',
+                    flexShrink: 0
                 }} />
+                
+                {/* Type Dropdown - Compact */}
+                <div style={{ minWidth: '55rem', maxWidth: '55rem' }}>
+                    <Dropdown
+                        theme={styleDropdown}
+                        content={[
+                            <DropdownItem
+                                key="incoming"
+                                theme={styleDropdown}
+                                value={ChainType.Incoming}
+                                closeOnSelect={true}
+                                onChange={() => onUpdate({ ...rule, type: ChainType.Incoming })}
+                            >
+                                Incoming
+                            </DropdownItem>,
+                            <DropdownItem
+                                key="outgoing"
+                                theme={styleDropdown}
+                                value={ChainType.Outgoing}
+                                closeOnSelect={true}
+                                onChange={() => onUpdate({ ...rule, type: ChainType.Outgoing })}
+                            >
+                                Outgoing
+                            </DropdownItem>
+                        ]}
+                    >
+                        <DropdownToggle>
+                            <span style={{ fontSize: '11rem' }}>
+                                {rule.type === ChainType.Incoming ? 'In' : 'Out'}
+                            </span>
+                        </DropdownToggle>
+                    </Dropdown>
+                </div>
+                
+                {/* Allow Dropdown - Compact */}
+                <div style={{ minWidth: '60rem', maxWidth: '60rem' }}>
+                    <Dropdown
+                        theme={styleDropdown}
+                        content={[
+                            <DropdownItem
+                                key="allow"
+                                theme={styleDropdown}
+                                value={AllowType.Allow}
+                                closeOnSelect={true}
+                                onChange={() => onUpdate({ ...rule, allow: AllowType.Allow })}
+                            >
+                                Allow
+                            </DropdownItem>,
+                            <DropdownItem
+                                key="disallow"
+                                theme={styleDropdown}
+                                value={AllowType.Disallow}
+                                closeOnSelect={true}
+                                onChange={() => onUpdate({ ...rule, allow: AllowType.Disallow })}
+                            >
+                                Disallow
+                            </DropdownItem>
+                        ]}
+                    >
+                        <DropdownToggle>
+                            <span style={{ fontSize: '11rem' }}>
+                                {rule.allow === AllowType.Allow ? 'Allow' : 'Deny'}
+                            </span>
+                        </DropdownToggle>
+                    </Dropdown>
+                </div>
+                
+                {/* Transport Dropdown - Compact */}
+                <div style={{ minWidth: '55rem', maxWidth: '55rem' }}>
+                    <Dropdown
+                        theme={styleDropdown}
+                        content={[
+                            <DropdownItem
+                                key="workers"
+                                theme={styleDropdown}
+                                value={TransportType.Workers}
+                                closeOnSelect={true}
+                                onChange={() => onUpdate({ ...rule, transportType: TransportType.Workers })}
+                            >
+                                Workers
+                            </DropdownItem>,
+                            <DropdownItem
+                                key="services"
+                                theme={styleDropdown}
+                                value={TransportType.Services}
+                                closeOnSelect={true}
+                                onChange={() => onUpdate({ ...rule, transportType: TransportType.Services })}
+                            >
+                                Services
+                            </DropdownItem>,
+                            <DropdownItem
+                                key="resources"
+                                theme={styleDropdown}
+                                value={TransportType.Resources}
+                                closeOnSelect={true}
+                                onChange={() => onUpdate({ ...rule, transportType: TransportType.Resources })}
+                            >
+                                Resources
+                            </DropdownItem>
+                        ]}
+                    >
+                        <DropdownToggle>
+                            <span style={{ fontSize: '11rem' }}>
+                                {rule.transportType === TransportType.Workers ? 'Work' :
+                                 rule.transportType === TransportType.Services ? 'Serv' :
+                                 'Res'}
+                            </span>
+                        </DropdownToggle>
+                    </Dropdown>
+                </div>
+                
+                {/* Delete button */}
                 <button
-                    onClick={() => onEditClick(rule.id)}
+                    onClick={onDelete}
                     style={{
-                        padding: '4rem 12rem',
-                        backgroundColor: 'rgba(0, 150, 255, 0.5)',
-                        border: '1px solid rgba(0, 150, 255, 0.8)',
+                        padding: '4rem 8rem',
+                        backgroundColor: 'rgba(255,0,0,0.3)',
+                        border: '1px solid rgba(255,0,0,0.5)',
                         borderRadius: '3rem',
-                        color: 'white',
+                        color: '#ff4444',
                         cursor: 'pointer',
-                        fontSize: '12rem'
+                        fontSize: '11rem',
+                        fontWeight: 'bold',
+                        flexShrink: 0
                     }}
                 >
-                    ✏️ Edit
+                    🗑️
                 </button>
             </div>
             
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '5rem', fontSize: '12rem' }}>
-                <div>
-                    <strong>Type:</strong> {rule?.type === ChainType.Incoming ? 'Incoming' : 'Outgoing'}
+            {/* Counts on second line if there are any */}
+            {(rule.buildings?.length > 0 || rule.districts?.length > 0 || rule.transportPriorities?.length > 0) && (
+                <div style={{ marginTop: '6rem', fontSize: '10rem', color: 'rgba(255,255,255,0.5)' }}>
+                    Buildings: {rule.buildings?.length || 0} | 
+                    Districts: {rule.districts?.length || 0} | 
+                    Priorities: {rule.transportPriorities?.length || 0}
                 </div>
-                <div>
-                    <strong>Allow:</strong> {rule?.allow === AllowType.Allow ? 'Allow' : 'Disallow'}
-                </div>
-                <div style={{ gridColumn: '1 / -1' }}>
-                    <strong>Transport:</strong> {
-                        rule?.transportType === TransportType.Workers ? 'Workers' :
-                        rule?.transportType === TransportType.Services ? 'Services' :
-                        'Resources'
-                    }
-                </div>
-            </div>
-            
-            <div style={{ marginTop: '8rem', fontSize: '11rem', color: 'rgba(255,255,255,0.6)' }}>
-                Buildings: {Array.isArray(rule?.buildings) ? rule.buildings.length : 0} | 
-                Districts: {Array.isArray(rule?.districts) ? rule.districts.length : 0} | 
-                Priorities: {Array.isArray(rule?.transportPriorities) ? rule.transportPriorities.length : 0}
-            </div>
+            )}
         </div>
     );
 };
@@ -104,7 +218,6 @@ const ManageResourceChainsPanel: React.FC<{ entityId: number; onClose: () => voi
     const configJson = useValue(resourceChainConfig$);
     const [config, setConfig] = useState<BuildingConfiguration | null>(null);
     const [isLoading, setIsLoading] = useState<boolean>(true);
-    const [editingRuleId, setEditingRuleId] = useState<string | null>(null);
 
     // ...existing useEffects...
 
@@ -199,7 +312,7 @@ const ManageResourceChainsPanel: React.FC<{ entityId: number; onClose: () => voi
         bottom: '6rem',
         right: '20rem',
         width: '450rem',
-        zIndex: 'calc(var(--tooltipIndex) - 1)' as any
+        zIndex: '9999' // High z-index to ensure dropdowns appear on top
     });
 
     const addNewRule = () => {
@@ -300,8 +413,8 @@ const ManageResourceChainsPanel: React.FC<{ entityId: number; onClose: () => voi
                     bottom: '6rem',
                     width: '400rem',
                     maxHeight: `${maxHeight}px`,
-                    zIndex: 'calc(var(--tooltipIndex) - 1)' as any,
-                    overflow: 'hidden'
+                    zIndex: '9999', // High z-index to ensure dropdowns appear on top
+                    overflow: 'visible' // Changed from hidden to visible for dropdowns
                 });
             }
         };
@@ -324,35 +437,29 @@ const ManageResourceChainsPanel: React.FC<{ entityId: number; onClose: () => voi
 
 
     return (
-        <Portal>
-            <div 
-                style={panelStyle}
-                className={stylePanel.panel}
-            >
-                <div className={styleDefault.header}>
-                    <div className={stylePanel.titleBar}>
+        <>
+            <Panel
+                header={(
+                    <div style={{ display: 'flex', alignItems: 'center', padding: '0 10rem' }}>
                         <img
-                            className={stylePanel.icon}
+                            style={{ width: '24rem', height: '24rem', marginRight: '8rem' }}
                             src="coui://uil/Colored/DeliveryVan.svg"
                             alt="Manage Resource Chains"
                         />
-                        <div className={styleDefault.title}>Manage Resource Chains</div>
-                        <button 
-                            className={`${styleCloseButton.button} ${stylePanel.closeButton}`}
-                            onClick={onClose}
-                        >
-                            <div 
-                                className={`${styleTintedIcon.tintedIcon} ${styleIcon.icon}`}
-                                style={{ 
-                                    maskImage: 'url(Media/Glyphs/Close.svg)',
-                                    WebkitMaskImage: 'url(Media/Glyphs/Close.svg)'
-                                }}
-                            />
-                        </button>
+                        <span>Manage Resource Chains</span>
                     </div>
-                </div>
-                
-                <div className={styleDefault.content}>
+                )}
+                onClose={onClose}
+                className="manage-resource-chains-panel"
+                style={{
+                    position: 'absolute',
+                    top: 'calc(16rem + var(--floatingToggleSize))',
+                    right: '20rem',
+                    width: '450rem',
+                    maxHeight: 'calc(100vh - 100rem)'
+                }}
+            >
+                <Scrollable>
                     {isLoading ? (
                         <div style={{ padding: '20rem', textAlign: 'center', color: 'rgba(255,255,255,0.7)' }}>
                             Loading configuration...
@@ -401,7 +508,6 @@ const ManageResourceChainsPanel: React.FC<{ entityId: number; onClose: () => voi
                                 {config && Array.isArray(config.rules) && config.rules.length > 0 && (
                                     <div key={`rules-container-${config.rules.length}`}>
                                         {config.rules.map((rule, index) => {
-                                            // Validate rule before rendering
                                             const isValid = rule && 
                                                 typeof rule.id === 'string' &&
                                                 typeof rule.color === 'string' &&
@@ -417,157 +523,14 @@ const ManageResourceChainsPanel: React.FC<{ entityId: number; onClose: () => voi
                                                 return null;
                                             }
                                             
-                                            const isEditing = editingRuleId === rule.id;
-                                            
                                             return (
-                                                <div key={`${rule.id}-${index}`}>
-                                                    <ResourceChainRuleComponent
-                                                        rule={rule}
-                                                        entityId={entityId}
-                                                        onUpdate={(updatedRule) => updateRule(rule.id, updatedRule)}
-                                                        onDelete={() => deleteRule(rule.id)}
-                                                        onEditClick={(ruleId) => setEditingRuleId(isEditing ? null : ruleId)}
-                                                    />
-                                                    
-                                                    {/* Inline editor - only shown when editing */}
-                                                    {isEditing && (
-                                                        <div style={{ 
-                                                            padding: '10rem',
-                                                            marginBottom: '10rem',
-                                                            backgroundColor: 'rgba(0,150,255,0.1)',
-                                                            border: '1px solid rgba(0,150,255,0.3)',
-                                                            borderRadius: '4rem'
-                                                        }}>
-                                                            <div style={{ marginBottom: '8rem' }}>
-                                                                <strong>Edit Type:</strong>
-                                                                <div style={{ display: 'flex', gap: '5rem', marginTop: '5rem' }}>
-                                                                    <button
-                                                                        onClick={() => {
-                                                                            updateRule(rule.id, { ...rule, type: ChainType.Incoming });
-                                                                        }}
-                                                                        style={{
-                                                                            padding: '5rem 10rem',
-                                                                            backgroundColor: rule.type === ChainType.Incoming ? 'rgba(0,255,0,0.3)' : 'rgba(255,255,255,0.1)',
-                                                                            border: `1px solid ${rule.type === ChainType.Incoming ? 'rgba(0,255,0,0.5)' : 'rgba(255,255,255,0.3)'}`,
-                                                                            borderRadius: '3rem',
-                                                                            color: 'white',
-                                                                            cursor: 'pointer'
-                                                                        }}
-                                                                    >
-                                                                        Incoming
-                                                                    </button>
-                                                                    <button
-                                                                        onClick={() => {
-                                                                            updateRule(rule.id, { ...rule, type: ChainType.Outgoing });
-                                                                        }}
-                                                                        style={{
-                                                                            padding: '5rem 10rem',
-                                                                            backgroundColor: rule.type === ChainType.Outgoing ? 'rgba(0,255,0,0.3)' : 'rgba(255,255,255,0.1)',
-                                                                            border: `1px solid ${rule.type === ChainType.Outgoing ? 'rgba(0,255,0,0.5)' : 'rgba(255,255,255,0.3)'}`,
-                                                                            borderRadius: '3rem',
-                                                                            color: 'white',
-                                                                            cursor: 'pointer'
-                                                                        }}
-                                                                    >
-                                                                        Outgoing
-                                                                    </button>
-                                                                </div>
-                                                            </div>
-                                                            
-                                                            <div style={{ marginBottom: '8rem' }}>
-                                                                <strong>Edit Allow:</strong>
-                                                                <div style={{ display: 'flex', gap: '5rem', marginTop: '5rem' }}>
-                                                                    <button
-                                                                        onClick={() => updateRule(rule.id, { ...rule, allow: AllowType.Allow })}
-                                                                        style={{
-                                                                            padding: '5rem 10rem',
-                                                                            backgroundColor: rule.allow === AllowType.Allow ? 'rgba(0,255,0,0.3)' : 'rgba(255,255,255,0.1)',
-                                                                            border: `1px solid ${rule.allow === AllowType.Allow ? 'rgba(0,255,0,0.5)' : 'rgba(255,255,255,0.3)'}`,
-                                                                            borderRadius: '3rem',
-                                                                            color: 'white',
-                                                                            cursor: 'pointer'
-                                                                        }}
-                                                                    >
-                                                                        Allow
-                                                                    </button>
-                                                                    <button
-                                                                        onClick={() => updateRule(rule.id, { ...rule, allow: AllowType.Disallow })}
-                                                                        style={{
-                                                                            padding: '5rem 10rem',
-                                                                            backgroundColor: rule.allow === AllowType.Disallow ? 'rgba(0,255,0,0.3)' : 'rgba(255,255,255,0.1)',
-                                                                            border: `1px solid ${rule.allow === AllowType.Disallow ? 'rgba(0,255,0,0.5)' : 'rgba(255,255,255,0.3)'}`,
-                                                                            borderRadius: '3rem',
-                                                                            color: 'white',
-                                                                            cursor: 'pointer'
-                                                                        }}
-                                                                    >
-                                                                        Disallow
-                                                                    </button>
-                                                                </div>
-                                                            </div>
-                                                            
-                                                            <div style={{ marginBottom: '8rem' }}>
-                                                                <strong>Edit Transport:</strong>
-                                                                <div style={{ display: 'flex', gap: '5rem', marginTop: '5rem', flexWrap: 'wrap' }}>
-                                                                    <button
-                                                                        onClick={() => updateRule(rule.id, { ...rule, transportType: TransportType.Workers })}
-                                                                        style={{
-                                                                            padding: '5rem 10rem',
-                                                                            backgroundColor: rule.transportType === TransportType.Workers ? 'rgba(0,255,0,0.3)' : 'rgba(255,255,255,0.1)',
-                                                                            border: `1px solid ${rule.transportType === TransportType.Workers ? 'rgba(0,255,0,0.5)' : 'rgba(255,255,255,0.3)'}`,
-                                                                            borderRadius: '3rem',
-                                                                            color: 'white',
-                                                                            cursor: 'pointer'
-                                                                        }}
-                                                                    >
-                                                                        Workers
-                                                                    </button>
-                                                                    <button
-                                                                        onClick={() => updateRule(rule.id, { ...rule, transportType: TransportType.Services })}
-                                                                        style={{
-                                                                            padding: '5rem 10rem',
-                                                                            backgroundColor: rule.transportType === TransportType.Services ? 'rgba(0,255,0,0.3)' : 'rgba(255,255,255,0.1)',
-                                                                            border: `1px solid ${rule.transportType === TransportType.Services ? 'rgba(0,255,0,0.5)' : 'rgba(255,255,255,0.3)'}`,
-                                                                            borderRadius: '3rem',
-                                                                            color: 'white',
-                                                                            cursor: 'pointer'
-                                                                        }}
-                                                                    >
-                                                                        Services
-                                                                    </button>
-                                                                    <button
-                                                                        onClick={() => updateRule(rule.id, { ...rule, transportType: TransportType.Resources })}
-                                                                        style={{
-                                                                            padding: '5rem 10rem',
-                                                                            backgroundColor: rule.transportType === TransportType.Resources ? 'rgba(0,255,0,0.3)' : 'rgba(255,255,255,0.1)',
-                                                                            border: `1px solid ${rule.transportType === TransportType.Resources ? 'rgba(0,255,0,0.5)' : 'rgba(255,255,255,0.3)'}`,
-                                                                            borderRadius: '3rem',
-                                                                            color: 'white',
-                                                                            cursor: 'pointer'
-                                                                        }}
-                                                                    >
-                                                                        Resources
-                                                                    </button>
-                                                                </div>
-                                                            </div>
-                                                            
-                                                            <button
-                                                                onClick={() => deleteRule(rule.id)}
-                                                                style={{
-                                                                    padding: '5rem 10rem',
-                                                                    backgroundColor: 'rgba(255,0,0,0.3)',
-                                                                    border: '1px solid rgba(255,0,0,0.5)',
-                                                                    borderRadius: '3rem',
-                                                                    color: '#ff4444',
-                                                                    cursor: 'pointer',
-                                                                    fontWeight: 'bold'
-                                                                }}
-                                                            >
-                                                                🗑️ Delete Rule
-                                                            </button>
-                                                        </div>
-                                                    )}
-                                                </div>
+                                                <ResourceChainRuleComponent
+                                                    key={`${rule.id}-${index}`}
+                                                    rule={rule}
+                                                    entityId={entityId}
+                                                    onUpdate={(updatedRule) => updateRule(rule.id, updatedRule)}
+                                                    onDelete={() => deleteRule(rule.id)}
+                                                />
                                             );
                                         })}
                                     </div>
@@ -596,9 +559,9 @@ const ManageResourceChainsPanel: React.FC<{ entityId: number; onClose: () => voi
                             </div>
                         </div>
                     )}
-                </div>
-            </div>
-        </Portal>
+                </Scrollable>
+            </Panel>
+        </>
     );
 };
 
