@@ -31,10 +31,14 @@ namespace ManageResourceChains
 
                 AssetDatabase.global.LoadSettings(nameof(ManageResourceChains), m_Setting, new Setting(this));
                 
-                // Register our UI system
+                // Register our UI systems
                 log.Info("Registering BuildingSelectionUISystem...");
                 updateSystem.UpdateAt<BuildingSelectionUISystem>(SystemUpdatePhase.UIUpdate);
                 log.Info("BuildingSelectionUISystem registered!");
+                
+                log.Info("Registering ResourceChainManagementSystem...");
+                updateSystem.UpdateAt<ResourceChainManagementSystem>(SystemUpdatePhase.UIUpdate);
+                log.Info("ResourceChainManagementSystem registered!");
             }
             catch (System.Exception ex)
             {

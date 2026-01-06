@@ -1,0 +1,90 @@
+﻿using System;
+using System.Collections.Generic;
+using Colossal.Serialization.Entities;
+using Unity.Entities;
+
+namespace ManageResourceChains.Data
+{
+    /// <summary>
+    /// Represents a single resource chain rule configuration
+    /// </summary>
+    [Serializable]
+    public class ResourceChainRule
+    {
+        public string Id { get; set; } = Guid.NewGuid().ToString();
+        public string Color { get; set; } = "#FF0000";
+        public ChainType Type { get; set; } = ChainType.Incoming;
+        public AllowType Allow { get; set; } = AllowType.Allow;
+        public TransportType TransportType { get; set; } = TransportType.Resources;
+        public List<int> Buildings { get; set; } = new List<int>();
+        public List<int> Districts { get; set; } = new List<int>();
+        public List<TransportPriority> TransportPriorities { get; set; } = new List<TransportPriority>();
+    }
+
+    [Serializable]
+    public class TransportPriority
+    {
+        public string Id { get; set; } = Guid.NewGuid().ToString();
+        public TransportStationType StationType { get; set; } = TransportStationType.TrainStation;
+        public int StationEntity { get; set; } = 0;
+        public int Priority { get; set; } = 1;
+    }
+
+    public enum ChainType
+    {
+        Incoming,
+        Outgoing
+    }
+
+    public enum AllowType
+    {
+        Allow,
+        Disallow
+    }
+
+    public enum TransportType
+    {
+        Workers,
+        Services,
+        Resources
+    }
+
+    public enum TransportStationType
+    {
+        TrainStation,
+        Airport,
+        Port,
+        BusStation,
+        SubwayStation
+    }
+
+    /// <summary>
+    /// Component data that will be attached to building entities to store their resource chain configuration
+    /// </summary>
+    public struct ResourceChainData : IComponentData, ISerializable
+    {
+        // We'll store a reference to the configuration in a lookup table
+        // since IComponentData should be blittable for performance
+        public int ConfigurationId;
+
+        public void Serialize<TWriter>(TWriter writer) where TWriter : IWriter
+        {
+            writer.Write(ConfigurationId);
+        }
+
+        public void Deserialize<TReader>(TReader reader) where TReader : IReader
+        {
+            reader.Read(out ConfigurationId);
+        }
+    }
+
+    /// <summary>
+    /// Storage for all building configurations
+    /// </summary>
+    public class BuildingConfiguration
+    {
+        public int BuildingEntityId { get; set; }
+        public List<ResourceChainRule> Rules { get; set; } = new List<ResourceChainRule>();
+    }
+}
+
