@@ -4,11 +4,16 @@ import { useValue } from "cs2/api";
 import { bindValue, trigger } from "cs2/api";
 import { getModule } from "cs2/modding";
 import { Portal, Dropdown, DropdownToggle, Panel, Scrollable } from "cs2/ui";
+import { Color } from "cs2/bindings";
 
 // Get DropdownItem dynamically to avoid TypeScript type/value confusion
 // @ts-ignore
 const UI = require("cs2/ui");
 const DropdownItem = UI.DropdownItem || UI.DropdownItem$1;
+
+// Get the game's ColorField component (color picker with RGB sliders)
+const ColorFieldModule = getModule("game-ui/common/input/color-picker/color-field/color-field.tsx", "ColorField");
+const FOCUS_DISABLED = getModule("game-ui/common/focus/focus-key.ts", "FOCUS_DISABLED");
 import { 
     ResourceChainRule, 
     BuildingConfiguration, 
@@ -35,7 +40,27 @@ const resourceChainConfig$ = bindValue<string>("manageResourceChains", "resource
 const BUTTON_CONTAINER_ID = 'manage-resource-chains-container';
 const ACTIONS_SECTION_CLASS = '.actions-section_X1x';
 
-// Compact component with inline dropdowns - always editable
+// Helper functions to convert between hex colors and Color objects
+function hexToColor(hex: string): Color {
+    // Remove # if present
+    hex = hex.replace('#', '');
+    
+    // Parse RGB values
+    const r = parseInt(hex.substring(0, 2), 16) / 255;
+    const g = parseInt(hex.substring(2, 4), 16) / 255;
+    const b = parseInt(hex.substring(4, 6), 16) / 255;
+    
+    return { r, g, b, a: 1 }; // Alpha always 1 for now
+}
+
+function colorToHex(color: Color): string {
+    const r = Math.round(color.r * 255).toString(16).padStart(2, '0');
+    const g = Math.round(color.g * 255).toString(16).padStart(2, '0');
+    const b = Math.round(color.b * 255).toString(16).padStart(2, '0');
+    return `#${r}${g}${b}`;
+}
+
+// Component with inline controls and two-column layout below
 const ResourceChainRuleComponent: React.FC<{
     rule: ResourceChainRule;
     entityId: number;
@@ -45,34 +70,49 @@ const ResourceChainRuleComponent: React.FC<{
     
     console.log("ResourceChainRuleComponent rendering, rule.id:", rule?.id);
     
-    // Compact layout with all dropdowns inline
     return (
         <div style={{ 
-            padding: '8rem', 
-            marginBottom: '8rem', 
+            padding: '10rem', 
+            marginBottom: '10rem', 
             border: '1px solid rgba(255,255,255,0.2)',
             borderRadius: '4rem',
             backgroundColor: 'rgba(0,0,0,0.2)'
         }}>
-            {/* Single row with all controls - wraps automatically */}
+            {/* Top row: Color picker + 3 dropdowns + Delete button */}
             <div style={{ 
                 display: 'flex', 
                 alignItems: 'center', 
-                gap: '8rem', 
-                flexWrap: 'wrap'
+                gap: '12rem',
+                marginBottom: '10rem'
             }}>
-                {/* Color indicator */}
+                {/* Color picker with RGB sliders - square */}
                 <div style={{ 
-                    width: '24rem', 
-                    height: '24rem', 
-                    backgroundColor: rule?.color || '#FF0000',
-                    border: '2px solid rgba(255,255,255,0.5)',
-                    borderRadius: '3rem',
-                    flexShrink: 0
-                }} />
+                    flexShrink: 0,
+                    width: '20rem',
+                    height: '20rem',
+                    overflow: 'hidden',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    marginRight: '4rem'
+                }}>
+                    <div style={{
+                        width: '20rem',
+                        height: '20rem'
+                    }}>
+                        <ColorFieldModule
+                            value={hexToColor(rule?.color || '#FF0000')}
+                            focusKey={FOCUS_DISABLED}
+                            onChange={(newColor: Color) => {
+                                onUpdate({ ...rule, color: colorToHex(newColor) });
+                            }}
+                            alpha={false}
+                        />
+                    </div>
+                </div>
                 
-                {/* Type Dropdown - Compact */}
-                <div style={{ minWidth: '55rem', maxWidth: '55rem' }}>
+                {/* Type Dropdown */}
+                <div style={{ flex: '1', minWidth: '100rem', marginRight: '4rem' }}>
                     <Dropdown
                         theme={styleDropdown}
                         content={[
@@ -97,15 +137,13 @@ const ResourceChainRuleComponent: React.FC<{
                         ]}
                     >
                         <DropdownToggle>
-                            <span style={{ fontSize: '11rem' }}>
-                                {rule.type === ChainType.Incoming ? 'In' : 'Out'}
-                            </span>
+                            {rule.type === ChainType.Incoming ? 'Incoming' : 'Outgoing'}
                         </DropdownToggle>
                     </Dropdown>
                 </div>
                 
-                {/* Allow Dropdown - Compact */}
-                <div style={{ minWidth: '60rem', maxWidth: '60rem' }}>
+                {/* Allow Dropdown */}
+                <div style={{ flex: '1', minWidth: '90rem', marginRight: '4rem' }}>
                     <Dropdown
                         theme={styleDropdown}
                         content={[
@@ -130,15 +168,13 @@ const ResourceChainRuleComponent: React.FC<{
                         ]}
                     >
                         <DropdownToggle>
-                            <span style={{ fontSize: '11rem' }}>
-                                {rule.allow === AllowType.Allow ? 'Allow' : 'Deny'}
-                            </span>
+                            {rule.allow === AllowType.Allow ? 'Allow' : 'Disallow'}
                         </DropdownToggle>
                     </Dropdown>
                 </div>
                 
-                {/* Transport Dropdown - Compact */}
-                <div style={{ minWidth: '55rem', maxWidth: '55rem' }}>
+                {/* Transport Dropdown */}
+                <div style={{ flex: '1', minWidth: '100rem', marginRight: '4rem' }}>
                     <Dropdown
                         theme={styleDropdown}
                         content={[
@@ -172,42 +208,225 @@ const ResourceChainRuleComponent: React.FC<{
                         ]}
                     >
                         <DropdownToggle>
-                            <span style={{ fontSize: '11rem' }}>
-                                {rule.transportType === TransportType.Workers ? 'Work' :
-                                 rule.transportType === TransportType.Services ? 'Serv' :
-                                 'Res'}
-                            </span>
+                            {rule.transportType === TransportType.Workers ? 'Workers' :
+                             rule.transportType === TransportType.Services ? 'Services' :
+                             'Resources'}
                         </DropdownToggle>
                     </Dropdown>
                 </div>
                 
-                {/* Delete button */}
+                {/* Delete button with XClose icon */}
                 <button
                     onClick={onDelete}
                     style={{
-                        padding: '4rem 8rem',
-                        backgroundColor: 'rgba(255,0,0,0.3)',
-                        border: '1px solid rgba(255,0,0,0.5)',
-                        borderRadius: '3rem',
-                        color: '#ff4444',
+                        padding: '4rem',
+                        backgroundColor: 'transparent',
+                        border: 'none',
                         cursor: 'pointer',
-                        fontSize: '11rem',
-                        fontWeight: 'bold',
-                        flexShrink: 0
+                        flexShrink: 0,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center'
                     }}
+                    title="Delete rule"
                 >
-                    🗑️
+                    <img
+                        src="coui://uil/Colored/XClose.svg"
+                        style={{
+                            width: '20rem',
+                            height: '20rem'
+                        }}
+                        alt="Delete"
+                    />
                 </button>
             </div>
             
-            {/* Counts on second line if there are any */}
-            {(rule.buildings?.length > 0 || rule.districts?.length > 0 || rule.transportPriorities?.length > 0) && (
-                <div style={{ marginTop: '6rem', fontSize: '10rem', color: 'rgba(255,255,255,0.5)' }}>
-                    Buildings: {rule.buildings?.length || 0} | 
-                    Districts: {rule.districts?.length || 0} | 
-                    Priorities: {rule.transportPriorities?.length || 0}
+            {/* Two-column layout below */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10rem' }}>
+                {/* Left column: Buildings/Districts */}
+                <div style={{ 
+                    padding: '8rem',
+                    backgroundColor: 'rgba(255,255,255,0.05)',
+                    borderRadius: '3rem'
+                }}>
+                    <div style={{ 
+                        display: 'flex', 
+                        justifyContent: 'space-between', 
+                        alignItems: 'center',
+                        marginBottom: '8rem',
+                        fontSize: '12rem',
+                        fontWeight: 'bold'
+                    }}>
+                        <span>Buildings / Districts</span>
+                        <div style={{ display: 'flex', gap: '8rem' }}>
+                            <button
+                                style={{
+                                    padding: '2rem 6rem',
+                                    backgroundColor: 'rgba(0,150,255,0.3)',
+                                    border: '1px solid rgba(0,150,255,0.5)',
+                                    borderRadius: '2rem',
+                                    color: 'white',
+                                    cursor: 'pointer',
+                                    fontSize: '10rem'
+                                }}
+                            >
+                                + Building
+                            </button>
+                            <button
+                                style={{
+                                    padding: '2rem 6rem',
+                                    backgroundColor: 'rgba(0,150,255,0.3)',
+                                    border: '1px solid rgba(0,150,255,0.5)',
+                                    borderRadius: '2rem',
+                                    color: 'white',
+                                    cursor: 'pointer',
+                                    fontSize: '10rem'
+                                }}
+                            >
+                                + District
+                            </button>
+                        </div>
+                    </div>
+                    
+                    {/* Buildings list */}
+                    {rule.buildings?.length > 0 && rule.buildings.map((building, idx) => (
+                        <div key={idx} style={{ 
+                            display: 'flex', 
+                            justifyContent: 'space-between',
+                            padding: '4rem',
+                            marginBottom: '4rem',
+                            backgroundColor: 'rgba(0,0,0,0.2)',
+                            borderRadius: '2rem',
+                            fontSize: '11rem'
+                        }}>
+                            <span>Building {building}</span>
+                            <button
+                                style={{
+                                    padding: '2rem 6rem',
+                                    backgroundColor: 'rgba(255,0,0,0.3)',
+                                    border: '1px solid rgba(255,0,0,0.5)',
+                                    borderRadius: '2rem',
+                                    color: '#ff4444',
+                                    cursor: 'pointer',
+                                    fontSize: '10rem'
+                                }}
+                            >
+                                -
+                            </button>
+                        </div>
+                    ))}
+                    
+                    {/* Districts list */}
+                    {rule.districts?.length > 0 && rule.districts.map((district, idx) => (
+                        <div key={idx} style={{ 
+                            display: 'flex', 
+                            justifyContent: 'space-between',
+                            padding: '4rem',
+                            marginBottom: '4rem',
+                            backgroundColor: 'rgba(0,0,0,0.2)',
+                            borderRadius: '2rem',
+                            fontSize: '11rem'
+                        }}>
+                            <span>District {district}</span>
+                            <button
+                                style={{
+                                    padding: '2rem 6rem',
+                                    backgroundColor: 'rgba(255,0,0,0.3)',
+                                    border: '1px solid rgba(255,0,0,0.5)',
+                                    borderRadius: '2rem',
+                                    color: '#ff4444',
+                                    cursor: 'pointer',
+                                    fontSize: '10rem'
+                                }}
+                            >
+                                -
+                            </button>
+                        </div>
+                    ))}
+                    
+                    {(!rule.buildings || rule.buildings.length === 0) && 
+                     (!rule.districts || rule.districts.length === 0) && (
+                        <div style={{ 
+                            textAlign: 'center', 
+                            color: 'rgba(255,255,255,0.4)',
+                            fontSize: '10rem',
+                            padding: '8rem'
+                        }}>
+                            No buildings or districts added
+                        </div>
+                    )}
                 </div>
-            )}
+                
+                {/* Right column: Transport Priorities */}
+                <div style={{ 
+                    padding: '8rem',
+                    backgroundColor: 'rgba(255,255,255,0.05)',
+                    borderRadius: '3rem'
+                }}>
+                    <div style={{ 
+                        display: 'flex', 
+                        justifyContent: 'space-between', 
+                        alignItems: 'center',
+                        marginBottom: '8rem',
+                        fontSize: '12rem',
+                        fontWeight: 'bold'
+                    }}>
+                        <span>Transport Priorities</span>
+                        <button
+                            style={{
+                                padding: '2rem 6rem',
+                                backgroundColor: 'rgba(0,150,255,0.3)',
+                                border: '1px solid rgba(0,150,255,0.5)',
+                                borderRadius: '2rem',
+                                color: 'white',
+                                cursor: 'pointer',
+                                fontSize: '10rem'
+                            }}
+                        >
+                            + Priority
+                        </button>
+                    </div>
+                    
+                    {/* Transport priorities list */}
+                    {rule.transportPriorities?.length > 0 && rule.transportPriorities.map((priority, idx) => (
+                        <div key={idx} style={{ 
+                            display: 'flex', 
+                            justifyContent: 'space-between',
+                            padding: '4rem',
+                            marginBottom: '4rem',
+                            backgroundColor: 'rgba(0,0,0,0.2)',
+                            borderRadius: '2rem',
+                            fontSize: '11rem'
+                        }}>
+                            <span>Priority {priority.priority}</span>
+                            <button
+                                style={{
+                                    padding: '2rem 6rem',
+                                    backgroundColor: 'rgba(255,0,0,0.3)',
+                                    border: '1px solid rgba(255,0,0,0.5)',
+                                    borderRadius: '2rem',
+                                    color: '#ff4444',
+                                    cursor: 'pointer',
+                                    fontSize: '10rem'
+                                }}
+                            >
+                                -
+                            </button>
+                        </div>
+                    ))}
+                    
+                    {(!rule.transportPriorities || rule.transportPriorities.length === 0) && (
+                        <div style={{ 
+                            textAlign: 'center', 
+                            color: 'rgba(255,255,255,0.4)',
+                            fontSize: '10rem',
+                            padding: '8rem'
+                        }}>
+                            No transport priorities added
+                        </div>
+                    )}
+                </div>
+            </div>
         </div>
     );
 };
