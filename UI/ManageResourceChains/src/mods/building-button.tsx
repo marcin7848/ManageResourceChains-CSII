@@ -771,7 +771,7 @@ const ManageResourceChainsPanel: React.FC<{ entityId: number; onClose: () => voi
                                                 boxShadow: '0 2px 8px rgba(0,0,0,0.3)'
                                             }}
                                         >
-                                            💾 Save All Changes
+                                            Save All Changes
                                         </button>
                                     </div>
                                 )}
