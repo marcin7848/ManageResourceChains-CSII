@@ -295,22 +295,18 @@ namespace ManageResourceChains.Systems
         }
 
         /// <summary>
-        /// Confirm building picker selection
+        /// Called when a building is selected during picking mode - updates UI immediately
         /// </summary>
-        public void ConfirmBuildingPicker()
+        public void OnBuildingSelected(Entity buildingEntity)
         {
             try
             {
-                Mod.log.Info("Confirming building picker selection");
-                
-                // Get selected buildings
-                var selectedBuildings = _buildingPickerToolSystem.SelectedBuildings;
-                Mod.log.Info($"Selected {selectedBuildings.Length} buildings");
+                int buildingId = buildingEntity.Index;
+                Mod.log.Info($"Building {buildingId} selected, updating UI");
                 
                 // Ensure config exists for this building
                 if (!_buildingConfigurations.TryGetValue(_currentBuildingEntityId, out var config))
                 {
-                    Mod.log.Info($"Creating new config for building {_currentBuildingEntityId}");
                     config = new Data.BuildingConfiguration
                     {
                         BuildingEntityId = _currentBuildingEntityId,
@@ -323,7 +319,6 @@ namespace ManageResourceChains.Systems
                 var rule = config.Rules.FirstOrDefault(r => r.Id == _currentRuleId);
                 if (rule == null)
                 {
-                    Mod.log.Info($"Rule {_currentRuleId} not found in config, creating new rule");
                     rule = new Data.ResourceChainRule
                     {
                         Id = _currentRuleId,
@@ -338,36 +333,43 @@ namespace ManageResourceChains.Systems
                     config.Rules.Add(rule);
                 }
                 
-                // Add buildings to the rule
-                Mod.log.Info($"Adding {selectedBuildings.Length} buildings to rule {_currentRuleId}");
-                for (int i = 0; i < selectedBuildings.Length; i++)
+                // Add building to the rule if not already present
+                if (!rule.Buildings.Contains(buildingId))
                 {
-                    int buildingId = selectedBuildings[i].Index;
-                    if (!rule.Buildings.Contains(buildingId))
-                    {
-                        rule.Buildings.Add(buildingId);
-                        Mod.log.Info($"✓ Added building {buildingId} to rule");
-                    }
-                    else
-                    {
-                        Mod.log.Info($"Building {buildingId} already in rule, skipping");
-                    }
+                    rule.Buildings.Add(buildingId);
+                    Mod.log.Info($"✓ Added building {buildingId} to rule {_currentRuleId}");
+                    
+                    // Send updated config to UI immediately
+                    string json = JsonConvert.SerializeObject(config, Formatting.Indented);
+                    _resourceChainConfigBinding.Update(json);
+                    
+                    Mod.log.Info($"UI updated with new building");
                 }
+            }
+            catch (Exception ex)
+            {
+                Mod.log.Error($"Error in OnBuildingSelected: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Confirm building picker selection
+        /// </summary>
+        public void ConfirmBuildingPicker()
+        {
+            try
+            {
+                Mod.log.Info("Confirming building picker selection");
                 
-                Mod.log.Info($"Rule now has {rule.Buildings.Count} total buildings");
-                
-                // Send updated config to UI
-                string json = JsonConvert.SerializeObject(config, Formatting.Indented);
-                Mod.log.Info($"Sending updated config to UI: {json}");
-                _resourceChainConfigBinding.Update(json);
-                
+                // Buildings are already added to the config via OnBuildingSelected
+                // Just save and deactivate the picker
                 SaveConfigurations();
                 
                 // Deactivate tool
                 _buildingPickerToolSystem.ConfirmSelection();
                 _buildingPickerActiveBinding.Update(false);
                 
-                Mod.log.Info("Building picker confirmed and config updated");
+                Mod.log.Info("Building picker confirmed and saved");
             }
             catch (Exception ex)
             {

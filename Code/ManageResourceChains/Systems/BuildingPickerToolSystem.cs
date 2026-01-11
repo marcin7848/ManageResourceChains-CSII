@@ -199,6 +199,9 @@ namespace ManageResourceChains.Systems
                 {
                     m_SelectedBuildings.Add(currentRaycastEntity);
                     m_Log.Info($"✓ Added building {currentRaycastEntity.Index} to selection. Total: {m_SelectedBuildings.Length}");
+                    
+                    // Immediately notify management system to update UI
+                    m_ResourceChainManagementSystem.OnBuildingSelected(currentRaycastEntity);
                 }
             }
 
