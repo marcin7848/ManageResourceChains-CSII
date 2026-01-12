@@ -23,16 +23,10 @@ import {
     ChainType, 
     AllowType, 
     TransportType,
-    TransportStationType,
-    TransportPriority
+    TransportStationType
 } from "./types";
 
 // Import game UI styles like CompanyBrandChanger does
-const stylePanel = getModule("game-ui/common/panel/panel.module.scss", "classes");
-const styleDefault = getModule("game-ui/common/panel/themes/default.module.scss", "classes");
-const styleIcon = getModule("game-ui/common/input/button/icon-button.module.scss", "classes");
-const styleTintedIcon = getModule("game-ui/common/image/tinted-icon.module.scss", "classes");
-const styleCloseButton = getModule("game-ui/common/input/button/themes/round-highlight-button.module.scss", "classes");
 const styleDropdown = getModule("game-ui/menu/themes/dropdown.module.scss", "classes");
 
 // Bindings to our C# system
@@ -41,7 +35,13 @@ const selectedBuildingEntity$ = bindValue<number>("manageResourceChains", "selec
 const resourceChainConfig$ = bindValue<string>("manageResourceChains", "resourceChainConfig", "{}");
 const buildingPickerActive$ = bindValue<boolean>("manageResourceChains", "buildingPickerActive", false);
 
+// District bindings
+const isDistrictSelected$ = bindValue<boolean>("manageResourceChains", "isDistrictSelected", false);
+const selectedDistrictEntity$ = bindValue<number>("manageResourceChains", "selectedDistrictEntity", 0);
+const districtConfig$ = bindValue<string>("manageResourceChains", "districtConfig", "{}");
+
 const BUTTON_CONTAINER_ID = 'manage-resource-chains-container';
+const DISTRICT_BUTTON_CONTAINER_ID = 'manage-resource-chains-district-container';
 const ACTIONS_SECTION_CLASS = '.actions-section_X1x';
 
 // Helper functions to convert between hex colors and Color objects
@@ -70,7 +70,8 @@ const ResourceChainRuleComponent: React.FC<{
     entityId: number;
     onUpdate: (rule: ResourceChainRule) => void;
     onDelete: () => void;
-}> = ({ rule, entityId, onUpdate, onDelete }) => {
+    isDistrict?: boolean;  // Optional: true if this is for a district
+}> = ({ rule, entityId, onUpdate, onDelete, isDistrict = false }) => {
     const buildingPickerActive = useValue(buildingPickerActive$);
     const [isPickingBuildings, setIsPickingBuildings] = useState(false);
     
@@ -85,7 +86,7 @@ const ResourceChainRuleComponent: React.FC<{
         // Only start picking if not already picking
         if (!isPickingBuildings) {
             setIsPickingBuildings(true);
-            trigger("manageResourceChains", "startBuildingPicker", entityId, rule.id);
+            trigger("manageResourceChains", "startBuildingPicker", entityId, rule.id, isDistrict);
         }
     };
     
@@ -497,8 +498,13 @@ const ResourceChainRuleComponent: React.FC<{
 
 // Management panel component that appears on the right side
 // Uses proper game UI module classes like CompanyBrandChanger
-const ManageResourceChainsPanel: React.FC<{ entityId: number; onClose: () => void }> = ({ entityId, onClose }) => {
-    const configJson = useValue(resourceChainConfig$);
+const ManageResourceChainsPanel: React.FC<{ 
+    entityId: number; 
+    onClose: () => void;
+    configBinding$?: any;  // Optional: use districtConfig$ for districts
+    isDistrict?: boolean;   // Optional: true if this is a district panel
+}> = ({ entityId, onClose, configBinding$ = resourceChainConfig$, isDistrict = false }) => {
+    const configJson = useValue(configBinding$) as string;
     const buildingPickerActive = useValue(buildingPickerActive$);
     const [config, setConfig] = useState<BuildingConfiguration | null>(null);
     const [isLoading, setIsLoading] = useState<boolean>(true);
@@ -508,8 +514,9 @@ const ManageResourceChainsPanel: React.FC<{ entityId: number; onClose: () => voi
     useEffect(() => {
         // Request config when entity changes
         setIsLoading(true);
-        trigger("manageResourceChains", "requestBuildingConfig", entityId);
-    }, [entityId]);
+        const requestType = isDistrict ? "requestDistrictConfig" : "requestBuildingConfig";
+        trigger("manageResourceChains", requestType, entityId);
+    }, [entityId, isDistrict]);
 
     useEffect(() => {
         // Parse config when it updates
@@ -575,14 +582,6 @@ const ManageResourceChainsPanel: React.FC<{ entityId: number; onClose: () => voi
             setIsLoading(false);
         }
     }, [configJson, entityId]);
-    const [panelStyle, setPanelStyle] = useState<React.CSSProperties>({
-        position: 'absolute',
-        top: 'calc(16rem + var(--floatingToggleSize))',
-        bottom: '6rem',
-        right: '20rem',
-        width: '450rem',
-        zIndex: '9999' // High z-index to ensure dropdowns appear on top
-    });
 
     const addNewRule = () => {
         const newRule: ResourceChainRule = {
@@ -640,7 +639,8 @@ const ManageResourceChainsPanel: React.FC<{ entityId: number; onClose: () => voi
         
         try {
             const json = JSON.stringify(config);
-            trigger("manageResourceChains", "saveBuildingConfig", entityId, json);
+            const saveType = isDistrict ? "saveDistrictConfig" : "saveBuildingConfig";
+            trigger("manageResourceChains", saveType, entityId, json);
             
             // Close the panel after saving
             setTimeout(() => {
@@ -650,45 +650,6 @@ const ManageResourceChainsPanel: React.FC<{ entityId: number; onClose: () => voi
             console.error("Error saving config:", error);
         }
     };
-
-    useEffect(() => {
-        const calculatePosition = () => {
-            // Find the building info panel (selected-info-panel)
-            const sipElement = document.querySelector('.selected-info-panel_gG8') as HTMLElement | null;
-            const wrapperElement = document.querySelector('.info-layout_BVk') as HTMLElement | null;
-            
-            if (sipElement && sipElement.offsetWidth > 0) {
-                const newPanelLeft = sipElement.offsetLeft + sipElement.offsetWidth;
-                const maxHeight = wrapperElement?.offsetHeight ?? 1600;
-                
-                setPanelStyle({
-                    position: 'absolute',
-                    left: `calc(${newPanelLeft}px + 20rem)`,
-                    top: 'calc(16rem + var(--floatingToggleSize))',
-                    bottom: '6rem',
-                    width: '400rem',
-                    maxHeight: `${maxHeight}px`,
-                    zIndex: '9999', // High z-index to ensure dropdowns appear on top
-                    overflow: 'visible' // Changed from hidden to visible for dropdowns
-                });
-            }
-        };
-
-        // Calculate immediately
-        calculatePosition();
-
-        // Observe DOM changes to recalculate position
-        const observer = new MutationObserver(() => {
-            calculatePosition();
-        });
-
-        observer.observe(document.body, {
-            childList: true,
-            subtree: true
-        });
-
-        return () => observer.disconnect();
-    }, [entityId]);
 
 
     return (
@@ -800,8 +761,8 @@ const ManageResourceChainsPanel: React.FC<{ entityId: number; onClose: () => voi
                                     <div key={`rules-container-${config.rules.length}`}>
                                         {config.rules.map((rule, index) => {
                                             const isValid = rule && 
-                                                typeof rule.id === 'string' &&
-                                                typeof rule.color === 'string' &&
+                                                rule.id &&
+                                                rule.color &&
                                                 typeof rule.type === 'number' &&
                                                 typeof rule.allow === 'number' &&
                                                 typeof rule.transportType === 'number' &&
@@ -821,6 +782,7 @@ const ManageResourceChainsPanel: React.FC<{ entityId: number; onClose: () => voi
                                                     entityId={entityId}
                                                     onUpdate={(updatedRule) => updateRule(rule.id, updatedRule)}
                                                     onDelete={() => deleteRule(rule.id)}
+                                                    isDistrict={isDistrict}
                                                 />
                                             );
                                         })}
@@ -998,3 +960,144 @@ export const BuildingButton = () => {
     );
 };
 
+// District button component - shows in district panel
+export const DistrictButton = () => {
+    const isDistrictSelected = useValue(isDistrictSelected$);
+    const selectedDistrictEntity = useValue(selectedDistrictEntity$);
+    const [isPanelOpen, setIsPanelOpen] = useState(false);
+
+    console.log("🏘️ DistrictButton render - isDistrictSelected:", isDistrictSelected, "selectedDistrictEntity:", selectedDistrictEntity);
+
+    // Handle panel open/close
+    const handleOpenPanel = () => {
+        console.log("🏘️ District panel opening for entity:", selectedDistrictEntity);
+        setIsPanelOpen(true);
+    };
+
+    const handleClosePanel = () => {
+        console.log("🏘️ District panel closing");
+        setIsPanelOpen(false);
+    };
+
+    // Close panel when district is deselected
+    useEffect(() => {
+        if (!isDistrictSelected || selectedDistrictEntity === 0) {
+            console.log("🏘️ District deselected, closing panel");
+            setIsPanelOpen(false);
+        }
+    }, [isDistrictSelected, selectedDistrictEntity]);
+
+    // Handle button injection
+    useEffect(() => {
+        if (!isDistrictSelected || selectedDistrictEntity === 0) {
+            // Remove button when no district is selected
+            console.log("🏘️ Removing district button - not selected");
+            const container = document.getElementById(DISTRICT_BUTTON_CONTAINER_ID);
+            if (container) {
+                ReactDOM.unmountComponentAtNode(container);
+                container.remove();
+            }
+            return;
+        }
+
+        console.log("🏘️ District selected, injecting button for entity:", selectedDistrictEntity);
+
+        let intervalId: number | undefined;
+        let attempts = 0;
+        const MAX_ATTEMPTS = 50; // 5 seconds at 100ms intervals
+        
+        const injectButton = (): boolean => {
+            attempts++;
+            
+            // Find the actions section
+            const actionsSection = document.querySelector(ACTIONS_SECTION_CLASS);
+            if (!actionsSection) {
+                if (attempts % 10 === 0) {
+                    console.log(`🏘️ Actions section not found (attempt ${attempts}/${MAX_ATTEMPTS})`);
+                }
+                return false; // Keep polling
+            }
+            
+            // Check if button container already exists
+            let container = actionsSection.querySelector<HTMLDivElement>(`#${DISTRICT_BUTTON_CONTAINER_ID}`);
+            if (container) {
+                console.log("🏘️ District button container already exists");
+                return true; // Success - stop polling
+            }
+            
+            // Create container div for React to render into
+            container = document.createElement('div');
+            container.id = DISTRICT_BUTTON_CONTAINER_ID;
+            
+            // Insert before the first non-button element (spacer/divider)
+            let insertBeforeElement = null;
+            for (let i = 0; i < actionsSection.children.length; i++) {
+                if (actionsSection.children[i].tagName !== 'BUTTON') {
+                    insertBeforeElement = actionsSection.children[i];
+                    break;
+                }
+            }
+            
+            if (insertBeforeElement) {
+                actionsSection.insertBefore(container, insertBeforeElement);
+            } else {
+                actionsSection.appendChild(container);
+            }
+            
+            console.log("🏘️ District button container created and inserted");
+            
+            // Render the React component into the container
+            ReactDOM.render(
+                <ManageResourceChainsButton 
+                    onOpenPanel={handleOpenPanel}
+                />,
+                container
+            );
+            
+            console.log("🏘️ District button rendered successfully");
+            return true; // Success - stop polling
+        };
+        
+        // Try immediately
+        if (!injectButton()) {
+            // Set up polling if first attempt failed
+            intervalId = window.setInterval(() => {
+                if (injectButton() || attempts >= MAX_ATTEMPTS) {
+                    if (intervalId !== undefined) {
+                        clearInterval(intervalId);
+                        intervalId = undefined;
+                    }
+                    if (attempts >= MAX_ATTEMPTS) {
+                        console.log("🏘️ Failed to inject district button after max attempts");
+                    }
+                }
+            }, 100);
+        }
+        
+        // Cleanup function
+        return () => {
+            if (intervalId !== undefined) {
+                clearInterval(intervalId);
+            }
+            const container = document.getElementById(DISTRICT_BUTTON_CONTAINER_ID);
+            if (container) {
+                ReactDOM.unmountComponentAtNode(container);
+                container.remove();
+            }
+        };
+    }, [isDistrictSelected, selectedDistrictEntity]);
+
+    // Render the panel directly when open (using districtConfig$ instead of resourceChainConfig$)
+    return (
+        <>
+            {isPanelOpen && selectedDistrictEntity !== 0 && (
+                <ManageResourceChainsPanel 
+                    entityId={selectedDistrictEntity} 
+                    onClose={handleClosePanel}
+                    configBinding$={districtConfig$}
+                    isDistrict={true}
+                />
+            )}
+        </>
+    );
+};

@@ -45,6 +45,10 @@ namespace ManageResourceChains
                 updateSystem.UpdateAt<BuildingSelectionUISystem>(SystemUpdatePhase.UIUpdate);
                 log.Info("BuildingSelectionUISystem registered!");
                 
+                log.Info("Registering DistrictSelectionUISystem...");
+                updateSystem.UpdateAt<DistrictSelectionUISystem>(SystemUpdatePhase.UIUpdate);
+                log.Info("DistrictSelectionUISystem registered!");
+                
                 log.Info("Registering ResourceChainManagementSystem...");
                 updateSystem.UpdateAt<ResourceChainManagementSystem>(SystemUpdatePhase.UIUpdate);
                 log.Info("ResourceChainManagementSystem registered!");

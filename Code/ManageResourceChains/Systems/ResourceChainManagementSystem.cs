@@ -1,4 +1,4 @@
-﻿using System;
+﻿﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -18,8 +18,12 @@ namespace ManageResourceChains.Systems
         // Storage for all building configurations (in-memory)
         private static Dictionary<int, Data.BuildingConfiguration> _buildingConfigurations = new Dictionary<int, Data.BuildingConfiguration>();
         
+        // Storage for all district configurations (in-memory)
+        private static Dictionary<int, Data.BuildingConfiguration> _districtConfigurations = new Dictionary<int, Data.BuildingConfiguration>();
+        
         // Bindings
         private ValueBinding<string> _resourceChainConfigBinding;
+        private ValueBinding<string> _districtConfigBinding;
         private ValueBinding<bool> _buildingPickerActiveBinding;
         
         // Tool systems
@@ -29,6 +33,7 @@ namespace ManageResourceChains.Systems
         // State for tracking building picker
         private string _currentRuleId;
         private int _currentBuildingEntityId;
+        private bool _isDistrictMode; // Track if we're working with a district or building
         
         protected override void OnCreate()
         {
@@ -41,17 +46,20 @@ namespace ManageResourceChains.Systems
             
             // Add binding to send configuration data to UI
             AddBinding(_resourceChainConfigBinding = new ValueBinding<string>("manageResourceChains", "resourceChainConfig", "{}"));
+            AddBinding(_districtConfigBinding = new ValueBinding<string>("manageResourceChains", "districtConfig", "{}"));
             AddBinding(_buildingPickerActiveBinding = new ValueBinding<bool>("manageResourceChains", "buildingPickerActive", false));
             
             // Add method bindings for UI to call
             AddBinding(new TriggerBinding<int>("manageResourceChains", "requestBuildingConfig", RequestBuildingConfig));
+            AddBinding(new TriggerBinding<int>("manageResourceChains", "requestDistrictConfig", RequestDistrictConfig));
             AddBinding(new TriggerBinding<int, string>("manageResourceChains", "saveBuildingConfig", SaveBuildingConfig));
+            AddBinding(new TriggerBinding<int, string>("manageResourceChains", "saveDistrictConfig", SaveDistrictConfig));
             AddBinding(new TriggerBinding<int, string>("manageResourceChains", "addResourceChainRule", AddResourceChainRule));
             AddBinding(new TriggerBinding<int, string>("manageResourceChains", "removeResourceChainRule", RemoveResourceChainRule));
             AddBinding(new TriggerBinding<int, string, string>("manageResourceChains", "updateResourceChainRule", UpdateResourceChainRule));
             
             // Building picker tool bindings
-            AddBinding(new TriggerBinding<int, string>("manageResourceChains", "startBuildingPicker", StartBuildingPicker));
+            AddBinding(new TriggerBinding<int, string, bool>("manageResourceChains", "startBuildingPicker", StartBuildingPicker));
             AddBinding(new TriggerBinding("manageResourceChains", "confirmBuildingPicker", ConfirmBuildingPicker));
             AddBinding(new TriggerBinding("manageResourceChains", "cancelBuildingPicker", CancelBuildingPicker));
             
@@ -114,6 +122,59 @@ namespace ManageResourceChains.Systems
             catch (Exception ex)
             {
                 Mod.log.Error($"Error saving building config: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Request configuration for a specific district
+        /// </summary>
+        private void RequestDistrictConfig(int districtEntityId)
+        {
+            try
+            {
+                Mod.log.Info($"Requesting config for district {districtEntityId}");
+                
+                if (!_districtConfigurations.ContainsKey(districtEntityId))
+                {
+                    _districtConfigurations[districtEntityId] = new Data.BuildingConfiguration
+                    {
+                        BuildingEntityId = districtEntityId,
+                        Rules = new List<Data.ResourceChainRule>()
+                    };
+                }
+                
+                var config = _districtConfigurations[districtEntityId];
+                string json = JsonConvert.SerializeObject(config, Formatting.Indented);
+                
+                Mod.log.Info($"Sending district config: {json}");
+                _districtConfigBinding.Update(json);
+            }
+            catch (Exception ex)
+            {
+                Mod.log.Error($"Error requesting district config: {ex.Message}");
+                _districtConfigBinding.Update("{}");
+            }
+        }
+
+        /// <summary>
+        /// Save configuration for a district
+        /// </summary>
+        private void SaveDistrictConfig(int districtEntityId, string configJson)
+        {
+            try
+            {
+                Mod.log.Info($"Saving config for district {districtEntityId}: {configJson}");
+                
+                var config = JsonConvert.DeserializeObject<Data.BuildingConfiguration>(configJson);
+                if (config != null)
+                {
+                    _districtConfigurations[districtEntityId] = config;
+                    SaveConfigurations();
+                }
+            }
+            catch (Exception ex)
+            {
+                Mod.log.Error($"Error saving district config: {ex.Message}");
             }
         }
 
@@ -210,10 +271,11 @@ namespace ManageResourceChains.Systems
         {
             try
             {
-                string configPath = GetConfigFilePath();
-                if (File.Exists(configPath))
+                // Load building configs
+                string buildingConfigPath = GetBuildingConfigFilePath();
+                if (File.Exists(buildingConfigPath))
                 {
-                    string json = File.ReadAllText(configPath);
+                    string json = File.ReadAllText(buildingConfigPath);
                     var configs = JsonConvert.DeserializeObject<List<Data.BuildingConfiguration>>(json);
                     
                     if (configs != null)
@@ -225,6 +287,25 @@ namespace ManageResourceChains.Systems
                         }
                         
                         Mod.log.Info($"Loaded {configs.Count} building configurations");
+                    }
+                }
+                
+                // Load district configs
+                string districtConfigPath = GetDistrictConfigFilePath();
+                if (File.Exists(districtConfigPath))
+                {
+                    string json = File.ReadAllText(districtConfigPath);
+                    var configs = JsonConvert.DeserializeObject<List<Data.BuildingConfiguration>>(json);
+                    
+                    if (configs != null)
+                    {
+                        _districtConfigurations.Clear();
+                        foreach (var config in configs)
+                        {
+                            _districtConfigurations[config.BuildingEntityId] = config;
+                        }
+                        
+                        Mod.log.Info($"Loaded {configs.Count} district configurations");
                     }
                 }
             }
@@ -249,18 +330,27 @@ namespace ManageResourceChains.Systems
         {
             try
             {
-                string configPath = GetConfigFilePath();
-                var configs = _buildingConfigurations.Values.ToList();
-                string json = JsonConvert.SerializeObject(configs, Formatting.Indented);
+                // Save building configs
+                string buildingConfigPath = GetBuildingConfigFilePath();
+                var buildingConfigs = _buildingConfigurations.Values.ToList();
+                string buildingJson = JsonConvert.SerializeObject(buildingConfigs, Formatting.Indented);
                 
-                string directory = Path.GetDirectoryName(configPath);
+                string directory = Path.GetDirectoryName(buildingConfigPath);
                 if (!string.IsNullOrEmpty(directory))
                 {
                     Directory.CreateDirectory(directory);
                 }
-                File.WriteAllText(configPath, json);
+                File.WriteAllText(buildingConfigPath, buildingJson);
                 
-                Mod.log.Info($"Saved {configs.Count} building configurations");
+                Mod.log.Info($"Saved {buildingConfigs.Count} building configurations");
+                
+                // Save district configs
+                string districtConfigPath = GetDistrictConfigFilePath();
+                var districtConfigs = _districtConfigurations.Values.ToList();
+                string districtJson = JsonConvert.SerializeObject(districtConfigs, Formatting.Indented);
+                File.WriteAllText(districtConfigPath, districtJson);
+                
+                Mod.log.Info($"Saved {districtConfigs.Count} district configurations");
             }
             catch (Exception ex)
             {
@@ -269,9 +359,9 @@ namespace ManageResourceChains.Systems
         }
 
         /// <summary>
-        /// Get the configuration file path
+        /// Get the building configuration file path
         /// </summary>
-        private string GetConfigFilePath()
+        private string GetBuildingConfigFilePath()
         {
             // Save in the user's local application data folder
             string userDataPath = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
@@ -280,15 +370,28 @@ namespace ManageResourceChains.Systems
         }
 
         /// <summary>
+        /// Get the district configuration file path
+        /// </summary>
+        private string GetDistrictConfigFilePath()
+        {
+            // Save in the user's local application data folder
+            string userDataPath = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            string modPath = Path.Combine(userDataPath, "Colossal Order", "Cities Skylines II", "ModsData", "ManageResourceChains");
+            return Path.Combine(modPath, "district_chain_configs.json");
+        }
+
+        /// <summary>
         /// Start building picker tool
         /// </summary>
-        private void StartBuildingPicker(int buildingEntityId, string ruleId)
+        private void StartBuildingPicker(int entityId, string ruleId, bool isDistrict)
         {
             try
             {
-                Mod.log.Info($"Starting building picker for building {buildingEntityId}, rule {ruleId}");
-                _currentBuildingEntityId = buildingEntityId;
+                string entityType = isDistrict ? "district" : "building";
+                Mod.log.Info($"Starting building picker for {entityType} {entityId}, rule {ruleId}");
+                _currentBuildingEntityId = entityId;
                 _currentRuleId = ruleId;
+                _isDistrictMode = isDistrict;
                 
                 // Activate the building picker tool
                 _toolSystem.activeTool = _buildingPickerToolSystem;
@@ -310,17 +413,22 @@ namespace ManageResourceChains.Systems
             try
             {
                 int buildingId = buildingEntity.Index;
-                Mod.log.Info($"Building {buildingId} selected, updating UI");
+                string entityType = _isDistrictMode ? "district" : "building";
+                Mod.log.Info($"Building {buildingId} selected for {entityType} {_currentBuildingEntityId}, updating UI");
                 
-                // Ensure config exists for this building
-                if (!_buildingConfigurations.TryGetValue(_currentBuildingEntityId, out var config))
+                // Get the correct configuration dictionary based on mode
+                var configDictionary = _isDistrictMode ? _districtConfigurations : _buildingConfigurations;
+                var configBinding = _isDistrictMode ? _districtConfigBinding : _resourceChainConfigBinding;
+                
+                // Ensure config exists for this entity
+                if (!configDictionary.TryGetValue(_currentBuildingEntityId, out var config))
                 {
                     config = new Data.BuildingConfiguration
                     {
                         BuildingEntityId = _currentBuildingEntityId,
                         Rules = new List<Data.ResourceChainRule>()
                     };
-                    _buildingConfigurations[_currentBuildingEntityId] = config;
+                    configDictionary[_currentBuildingEntityId] = config;
                 }
                 
                 // Find or create the rule
@@ -345,13 +453,13 @@ namespace ManageResourceChains.Systems
                 if (!rule.Buildings.Contains(buildingId))
                 {
                     rule.Buildings.Add(buildingId);
-                    Mod.log.Info($"✓ Added building {buildingId} to rule {_currentRuleId}");
+                    Mod.log.Info($"✓ Added building {buildingId} to {entityType} rule {_currentRuleId}");
                     
                     // Send updated config to UI immediately
                     string json = JsonConvert.SerializeObject(config, Formatting.Indented);
-                    _resourceChainConfigBinding.Update(json);
+                    configBinding.Update(json);
                     
-                    Mod.log.Info($"UI updated with new building");
+                    Mod.log.Info($"UI updated with new building for {entityType}");
                 }
             }
             catch (Exception ex)
