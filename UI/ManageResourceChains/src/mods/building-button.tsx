@@ -71,9 +71,6 @@ const ResourceChainRuleComponent: React.FC<{
     onUpdate: (rule: ResourceChainRule) => void;
     onDelete: () => void;
 }> = ({ rule, entityId, onUpdate, onDelete }) => {
-    
-    console.log("ResourceChainRuleComponent rendering, rule.id:", rule?.id);
-    
     const buildingPickerActive = useValue(buildingPickerActive$);
     const [isPickingBuildings, setIsPickingBuildings] = useState(false);
     
@@ -87,7 +84,6 @@ const ResourceChainRuleComponent: React.FC<{
     const startBuildingPicker = () => {
         // Only start picking if not already picking
         if (!isPickingBuildings) {
-            console.log("🎯 Starting building picker for rule:", rule.id);
             setIsPickingBuildings(true);
             trigger("manageResourceChains", "startBuildingPicker", entityId, rule.id);
         }
@@ -332,7 +328,6 @@ const ResourceChainRuleComponent: React.FC<{
                             <span>Building {building}</span>
                             <button
                                 onClick={() => {
-                                    console.log(`Removing building ${building} from rule ${rule.id}`);
                                     const updatedBuildings = rule.buildings.filter((b) => b !== building);
                                     onUpdate({ ...rule, buildings: updatedBuildings });
                                 }}
@@ -374,7 +369,6 @@ const ResourceChainRuleComponent: React.FC<{
                             <span>District {district}</span>
                             <button
                                 onClick={() => {
-                                    console.log(`Removing district ${district} from rule ${rule.id}`);
                                     const updatedDistricts = rule.districts.filter((d) => d !== district);
                                     onUpdate({ ...rule, districts: updatedDistricts });
                                 }}
@@ -459,7 +453,6 @@ const ResourceChainRuleComponent: React.FC<{
                             <span>Priority {priority.priority}</span>
                             <button
                                 onClick={() => {
-                                    console.log(`Removing transport priority ${priority.id} from rule ${rule.id}`);
                                     const updatedPriorities = rule.transportPriorities.filter((p) => p.id !== priority.id);
                                     onUpdate({ ...rule, transportPriorities: updatedPriorities });
                                 }}
@@ -509,11 +502,6 @@ const ManageResourceChainsPanel: React.FC<{ entityId: number; onClose: () => voi
     const buildingPickerActive = useValue(buildingPickerActive$);
     const [config, setConfig] = useState<BuildingConfiguration | null>(null);
     const [isLoading, setIsLoading] = useState<boolean>(true);
-    
-    // Debug: Log when buildingPickerActive changes
-    useEffect(() => {
-        console.log("🔍 Panel: buildingPickerActive changed to:", buildingPickerActive);
-    }, [buildingPickerActive]);
 
 
 
@@ -526,16 +514,12 @@ const ManageResourceChainsPanel: React.FC<{ entityId: number; onClose: () => voi
     useEffect(() => {
         // Parse config when it updates
         try {
-            console.log("Received configJson:", configJson);
-            
             if (configJson && configJson !== "{}") {
                 const parsed = JSON.parse(configJson);
-                console.log("Parsed config:", JSON.stringify(parsed, null, 2));
                 
                 // Ensure Rules/rules is an array
                 const rulesArray = parsed.Rules || parsed.rules;
                 if (!Array.isArray(rulesArray)) {
-                    console.error("Rules is not an array:", rulesArray);
                     setConfig({
                         buildingEntityId: entityId,
                         rules: []
@@ -544,20 +528,16 @@ const ManageResourceChainsPanel: React.FC<{ entityId: number; onClose: () => voi
                     return;
                 }
                 
-                console.log("Rules array has", rulesArray.length, "rules");
-                
                 // Convert camelCase from C# to match our types
                 const normalizedConfig: BuildingConfiguration = {
                     buildingEntityId: parsed.BuildingEntityId || parsed.buildingEntityId || entityId,
-                    rules: rulesArray.map((r: any, index: number) => {
-                        console.log(`Normalizing rule ${index}:`, JSON.stringify(r, null, 2));
-                        
+                    rules: rulesArray.map((r: any) => {
                         // Ensure all arrays exist
                         const buildings = r.Buildings || r.buildings;
                         const districts = r.Districts || r.districts;
                         const transportPriorities = r.TransportPriorities || r.transportPriorities;
                         
-                        const normalizedRule = {
+                        return {
                             id: r.Id || r.id || Math.random().toString(36).substr(2, 9),
                             color: r.Color || r.color || '#FF0000',
                             type: r.Type ?? r.type ?? ChainType.Incoming,
@@ -574,19 +554,12 @@ const ManageResourceChainsPanel: React.FC<{ entityId: number; onClose: () => voi
                                 }))
                                 : []
                         };
-                        
-                        console.log(`Normalized rule ${index} result:`, JSON.stringify(normalizedRule, null, 2));
-                        return normalizedRule;
                     })
                 };
                 
-                console.log("Final normalized config:", JSON.stringify(normalizedConfig, null, 2));
-                console.log("Setting config with", normalizedConfig.rules.length, "rules");
                 setConfig(normalizedConfig);
                 setIsLoading(false);
-                console.log("Config set and loading complete");
             } else {
-                console.log("Empty config, initializing with defaults");
                 setConfig({
                     buildingEntityId: entityId,
                     rules: []
@@ -594,7 +567,7 @@ const ManageResourceChainsPanel: React.FC<{ entityId: number; onClose: () => voi
                 setIsLoading(false);
             }
         } catch (error) {
-            console.error("Error parsing config:", error, "configJson:", configJson);
+            console.error("Error parsing config:", error);
             setConfig({
                 buildingEntityId: entityId,
                 rules: []
@@ -612,8 +585,6 @@ const ManageResourceChainsPanel: React.FC<{ entityId: number; onClose: () => voi
     });
 
     const addNewRule = () => {
-        console.log("addNewRule called, current config:", JSON.stringify(config, null, 2));
-        
         const newRule: ResourceChainRule = {
             id: Math.random().toString(36).substr(2, 9),
             color: '#' + Math.floor(Math.random()*16777215).toString(16),
@@ -625,39 +596,24 @@ const ManageResourceChainsPanel: React.FC<{ entityId: number; onClose: () => voi
             transportPriorities: []
         };
 
-        console.log("Created new rule:", JSON.stringify(newRule, null, 2));
-
         const currentConfig = config || {
             buildingEntityId: entityId,
             rules: []
         };
-
-        console.log("Current config for merge:", JSON.stringify(currentConfig, null, 2));
         
         // Ensure rules is an array
         const currentRules = Array.isArray(currentConfig.rules) ? currentConfig.rules : [];
-        console.log("Current rules array:", JSON.stringify(currentRules, null, 2), "length:", currentRules.length);
 
         const newConfig: BuildingConfiguration = {
             buildingEntityId: currentConfig.buildingEntityId,
             rules: [...currentRules, newRule]
         };
         
-        console.log("New config to set:", JSON.stringify(newConfig, null, 2));
-        console.log("Verifying new config rules is array:", Array.isArray(newConfig.rules), "length:", newConfig.rules.length);
-        
-        // Double check the rule we're about to render
-        console.log("Rule that will be rendered:", JSON.stringify(newConfig.rules[newConfig.rules.length - 1], null, 2));
-        
         setConfig(newConfig);
-        console.log("Config set successfully");
     };
 
     const updateRule = (ruleId: string, updatedRule: ResourceChainRule) => {
-        console.log("updateRule called for:", ruleId, "with:", updatedRule);
-        
         if (!config || !Array.isArray(config.rules)) {
-            console.error("updateRule: config or rules invalid", config);
             return;
         }
         
@@ -666,7 +622,6 @@ const ManageResourceChainsPanel: React.FC<{ entityId: number; onClose: () => voi
             rules: config.rules.map(r => r.id === ruleId ? updatedRule : r)
         };
         
-        console.log("updateRule: new config:", newConfig);
         setConfig(newConfig);
     };
 
@@ -686,7 +641,6 @@ const ManageResourceChainsPanel: React.FC<{ entityId: number; onClose: () => voi
         try {
             const json = JSON.stringify(config);
             trigger("manageResourceChains", "saveBuildingConfig", entityId, json);
-            console.log("Configuration saved successfully");
             
             // Close the panel after saving
             setTimeout(() => {
@@ -764,7 +718,6 @@ const ManageResourceChainsPanel: React.FC<{ entityId: number; onClose: () => voi
                 onClick={(e) => {
                     // Handle clicks on the panel to finish picking mode
                     if (buildingPickerActive) {
-                        console.log("✅ Panel clicked while picking - finishing building picker");
                         trigger("manageResourceChains", "confirmBuildingPicker");
                         e.stopPropagation(); // Prevent event from bubbling
                     }
@@ -857,7 +810,7 @@ const ManageResourceChainsPanel: React.FC<{ entityId: number; onClose: () => voi
                                                 Array.isArray(rule.transportPriorities);
                                             
                                             if (!isValid) {
-                                                console.error("Invalid rule detected, skipping render:", JSON.stringify(rule, null, 2));
+                                                console.error("Invalid rule detected, skipping render:", rule);
                                                 return null;
                                             }
                                             

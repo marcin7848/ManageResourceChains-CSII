@@ -109,9 +109,6 @@ namespace ManageResourceChains.Systems
             base.OnStartRunning();
             m_SelectedBuildings.Clear();
             applyAction.shouldBeEnabled = true;
-            m_Log.Info($"*** {nameof(BuildingPickerToolSystem)} STARTED RUNNING ***");
-            m_Log.Info($"Tool enabled: {Enabled}");
-            m_Log.Info($"Apply action enabled: {applyAction.shouldBeEnabled}");
         }
 
         /// <inheritdoc/>
@@ -133,7 +130,6 @@ namespace ManageResourceChains.Systems
             // Check for Escape key (cancelAction) to cancel selection
             if (cancelAction.WasPressedThisFrame())
             {
-                m_Log.Info($"❌ Escape pressed - cancelling selection");
                 m_ResourceChainManagementSystem.CancelBuildingPicker();
                 return inputDeps;
             }
@@ -147,7 +143,7 @@ namespace ManageResourceChains.Systems
                 return inputDeps;
             }
 
-            // Only log when encountering a new building
+            // Only proceed if entity has Building component
             if (!EntityManager.HasComponent<Building>(currentRaycastEntity))
             {
                 buffer.AddComponent<BatchesUpdated>(m_HighlightedQuery, EntityQueryCaptureMode.AtPlayback);
@@ -159,7 +155,6 @@ namespace ManageResourceChains.Systems
             // Update highlighting
             if (currentRaycastEntity != m_PreviousRaycastedEntity)
             {
-                m_Log.Info($"🏗️ Highlighting building: {currentRaycastEntity.Index}");
                 m_PreviousRaycastedEntity = currentRaycastEntity;
                 NativeArray<Entity> entities = m_HighlightedQuery.ToEntityArray(Allocator.Temp);
                 buffer.AddComponent<BatchesUpdated>(entities);
@@ -173,16 +168,9 @@ namespace ManageResourceChains.Systems
                 m_PreviousRaycastedEntity = currentRaycastEntity;
             }
 
-            // Check for mouse click - AFTER raycast validation but don't return early
-            if (applyAction.WasPressedThisFrame())
-            {
-                m_Log.Info($"🖱️ Apply action PRESSED! Current entity under cursor: {currentRaycastEntity.Index}");
-            }
-            
+            // Check for mouse click to add building to selection
             if (applyAction.WasReleasedThisFrame())
             {
-                m_Log.Info($"🖱️ Apply action RELEASED! Current entity: {currentRaycastEntity.Index}");
-                
                 // Check if not already selected
                 bool alreadySelected = false;
                 for (int i = 0; i < m_SelectedBuildings.Length; i++)
@@ -190,7 +178,6 @@ namespace ManageResourceChains.Systems
                     if (m_SelectedBuildings[i] == currentRaycastEntity)
                     {
                         alreadySelected = true;
-                        m_Log.Info($"Building {currentRaycastEntity.Index} already selected");
                         break;
                     }
                 }
@@ -198,7 +185,6 @@ namespace ManageResourceChains.Systems
                 if (!alreadySelected)
                 {
                     m_SelectedBuildings.Add(currentRaycastEntity);
-                    m_Log.Info($"✓ Added building {currentRaycastEntity.Index} to selection. Total: {m_SelectedBuildings.Length}");
                     
                     // Immediately notify management system to update UI
                     m_ResourceChainManagementSystem.OnBuildingSelected(currentRaycastEntity);
