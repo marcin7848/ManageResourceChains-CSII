@@ -235,6 +235,14 @@ namespace ManageResourceChains.Systems
         }
 
         /// <summary>
+        /// Get all building configurations (for use by other systems like pathfinding)
+        /// </summary>
+        public Dictionary<int, Data.BuildingConfiguration> GetAllConfigurations()
+        {
+            return _buildingConfigurations;
+        }
+
+        /// <summary>
         /// Save configurations to file
         /// </summary>
         private void SaveConfigurations()

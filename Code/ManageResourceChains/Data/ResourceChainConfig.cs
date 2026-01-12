@@ -19,6 +19,35 @@ namespace ManageResourceChains.Data
         public List<int> Buildings { get; set; } = new List<int>();
         public List<int> Districts { get; set; } = new List<int>();
         public List<TransportPriority> TransportPriorities { get; set; } = new List<TransportPriority>();
+        
+        // Additional granular filters
+        public List<int> SpecificResources { get; set; } = new List<int>(); // Resource indices to filter (empty = all)
+        public List<int> WorkerEducationLevels { get; set; } = new List<int>(); // 0-4 education levels (empty = all)
+        
+        /// <summary>
+        /// Check if transport is allowed from/to a specific building based on this rule
+        /// </summary>
+        /// <param name="buildingEntity">The building entity to check</param>
+        /// <param name="isSource">True if this building is the source, false if destination</param>
+        /// <returns>True if transport is allowed</returns>
+        public bool IsTransportAllowed(int buildingEntity, bool isSource)
+        {
+            // Check if this building is affected by the rule
+            bool isAffected = Buildings.Contains(buildingEntity);
+            
+            if (!isAffected)
+                return true; // Not affected by this rule
+            
+            // Check direction
+            bool matchesDirection = (Type == ChainType.Incoming && !isSource) || 
+                                   (Type == ChainType.Outgoing && isSource);
+            
+            if (!matchesDirection)
+                return true; // Direction doesn't match
+            
+            // Return based on Allow/Disallow
+            return Allow == AllowType.Allow;
+        }
     }
 
     [Serializable]
