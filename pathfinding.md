@@ -140,3 +140,105 @@ public class ResourceChainRule
 
 **Key Addition Needed**: You need to track which specific resource types or worker levels to filter, not just all resources/workers.
 
+---
+
+## ✅ IMPLEMENTED: Worker Restriction System
+
+### Overview
+
+The mod now includes a fully functional **Worker Restriction System** that actively enforces rules preventing citizens from working at specific buildings based on configured DISALLOW rules.
+
+### Implementation Approach
+
+**Post-Employment Validation with Active Enforcement**:
+- Workers are hired normally through the game's standard pathfinding system
+- A dedicated enforcement system (`ResourceChainPathfindSystem`) periodically checks all workers every ~2 seconds
+- Workers violating DISALLOW rules are immediately removed from their workplace and become unemployed
+- This approach is compatible with other mods and doesn't interfere with the game's core pathfinding
+
+### How It Works
+
+The `ResourceChainPathfindSystem` runs in the `GameSimulation` phase and:
+
+1. **Queries all workers** in the game using ECS entity queries
+2. **Gets each worker's home and workplace** by following the component relationships (Worker → HouseholdMember → PropertyRenter)
+3. **Checks rules** to see if the worker-workplace combination is allowed
+4. **Removes violating workers** from the workplace's employee list and removes their Worker component
+
+### Rule Types
+
+**OUTGOING Rules** (applied to residential buildings):
+- Restricts where residents of a building can work
+- If a home building has an OUTGOING + DISALLOW rule, residents cannot work at buildings in the rule's building list
+
+**INCOMING Rules** (applied to workplace buildings):
+- Restricts who can work at a building
+- If a workplace has an INCOMING + DISALLOW rule, workers from homes in the rule's building list cannot work there
+
+### Example Usage
+
+**Scenario 1**: Prevent residents of Building A from working at Factory B and Factory C
+- Create an OUTGOING + DISALLOW + Workers rule on Building A
+- Add Factory B and Factory C to the buildings list
+- Result: Citizens from Building A will be removed from those factories and cannot return
+
+**Scenario 2**: Restrict Office Building X to exclude workers from specific residential areas
+- Create an INCOMING + DISALLOW + Workers rule on Office X
+- Add the unwanted residential buildings to the list
+- Result: Workers from those homes are removed and cannot work at Office X
+
+### Performance
+
+- System updates every 128 frames (~2 seconds at 60fps)
+- Uses efficient ECS queries for worker iteration
+- Only processes when rules are configured
+- Minimal performance impact on most cities
+- Scales well with number of workers
+
+### Data Storage
+
+Rules are persisted per-building in JSON files:
+- Location: `%LocalAppData%Low\Colossal Order\Cities Skylines II\ModsData\ManageResourceChains\`
+- Filename format: `building_{entityId}.json`
+- Contains building ID, rules array with type, allow/disallow, transport type, and target building lists
+
+### Current Limitations
+
+1. Only DISALLOW rules are actively enforced (ALLOW rules are passive)
+2. Workers are removed after being hired, not prevented from hiring initially
+3. No filtering by education level or worker type
+4. No time-based or conditional rules
+5. District-based rules not yet implemented
+
+### Future Enhancements
+
+**Planned improvements**:
+- Proactive prevention by hooking into job search system
+- Education level filtering for more granular control
+- Extension to resource deliveries and service vehicles
+- Transport priority system implementation
+- District-based rules instead of only building-based
+- Time-based and conditional rules (day/night, seasonal, etc.)
+
+---
+
+## Future: Resource & Service Restrictions
+
+The same enforcement pattern can be extended to other transport types:
+
+**Resource Restrictions** (Planned):
+- Block specific resource types from being transported between buildings
+- Enforce resource chain priorities for industrial zones
+- Control warehouse-to-factory supply chains
+
+**Service Restrictions** (Planned):
+- Block service vehicles (garbage, ambulance, fire, police) from specific buildings
+- Control service coverage areas
+- Restrict patrol and service routes
+
+**Implementation Approach**:
+- Reuse the `ResourceChainPathfindSystem` framework
+- Add resource-type and service-type specific validation
+- Implement both proactive filtering and reactive enforcement
+- Maintain performance with comprehensive logging for debugging
+

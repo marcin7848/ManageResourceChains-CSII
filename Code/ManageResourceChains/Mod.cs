@@ -49,6 +49,11 @@ namespace ManageResourceChains
                 updateSystem.UpdateAt<ResourceChainManagementSystem>(SystemUpdatePhase.UIUpdate);
                 log.Info("ResourceChainManagementSystem registered!");
                 
+                // Register pathfind system for worker restrictions
+                log.Info("Registering ResourceChainPathfindSystem...");
+                updateSystem.UpdateAt<ResourceChainPathfindSystem>(SystemUpdatePhase.GameSimulation);
+                log.Info("ResourceChainPathfindSystem registered!");
+                
                 // Register building picker tool
                 log.Info("Registering BuildingPickerToolSystem...");
                 updateSystem.UpdateAt<BuildingPickerToolSystem>(SystemUpdatePhase.ToolUpdate);
