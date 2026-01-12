@@ -156,7 +156,10 @@ namespace ManageResourceChains.Systems
         }
 
         /// <summary>
-        /// Check if worker transport is allowed between a home and a workplace based on active rules
+        /// Check if worker transport is allowed between a home and a workplace based on active rules.
+        /// NEW LOGIC:
+        /// - DISALLOW = Blacklist (allow everything EXCEPT listed buildings)
+        /// - ALLOW = Whitelist (allow ONLY listed buildings, block everything else)
         /// </summary>
         /// <param name="homeBuilding">Home building entity ID</param>
         /// <param name="workplaceBuilding">Workplace building entity ID</param>
@@ -182,37 +185,51 @@ namespace ManageResourceChains.Systems
                         continue;
 
                     // Check OUTGOING rules from HOME
-                    if (rule.Type == ChainType.Outgoing)
+                    if (rule.Type == ChainType.Outgoing && config.BuildingEntityId == homeBuilding)
                     {
-                        // Check if this home building has the rule
-                        if (config.BuildingEntityId == homeBuilding)
+                        bool isInList = rule.Buildings.Contains(workplaceBuilding);
+                        
+                        if (rule.Allow == AllowType.Disallow)
                         {
-                            // Check if the workplace is in the rule's building list
-                            if (rule.Buildings.Contains(workplaceBuilding))
+                            // DISALLOW = Blacklist: Block if IN the list
+                            if (isInList)
                             {
-                                if (rule.Allow == AllowType.Disallow)
-                                {
-                                    Mod.log.Info($"🚫 Worker transport BLOCKED: Home {homeBuilding} -> Workplace {workplaceBuilding} (OUTGOING DISALLOW rule '{rule.Id}')");
-                                    return false;
-                                }
+                                Mod.log.Info($"🚫 Worker BLOCKED (Blacklist): Home {homeBuilding} -> Workplace {workplaceBuilding} (OUTGOING DISALLOW rule '{rule.Id}')");
+                                return false;
+                            }
+                        }
+                        else // AllowType.Allow
+                        {
+                            // ALLOW = Whitelist: Block if NOT in the list
+                            if (!isInList)
+                            {
+                                Mod.log.Info($"🚫 Worker BLOCKED (Whitelist): Home {homeBuilding} -> Workplace {workplaceBuilding} (OUTGOING ALLOW rule '{rule.Id}' - not in allowed list)");
+                                return false;
                             }
                         }
                     }
 
                     // Check INCOMING rules to WORKPLACE
-                    if (rule.Type == ChainType.Incoming)
+                    if (rule.Type == ChainType.Incoming && config.BuildingEntityId == workplaceBuilding)
                     {
-                        // Check if this workplace building has the rule
-                        if (config.BuildingEntityId == workplaceBuilding)
+                        bool isInList = rule.Buildings.Contains(homeBuilding);
+                        
+                        if (rule.Allow == AllowType.Disallow)
                         {
-                            // Check if the home is in the rule's building list
-                            if (rule.Buildings.Contains(homeBuilding))
+                            // DISALLOW = Blacklist: Block if IN the list
+                            if (isInList)
                             {
-                                if (rule.Allow == AllowType.Disallow)
-                                {
-                                    Mod.log.Info($"🚫 Worker transport BLOCKED: Home {homeBuilding} -> Workplace {workplaceBuilding} (INCOMING DISALLOW rule '{rule.Id}')");
-                                    return false;
-                                }
+                                Mod.log.Info($"🚫 Worker BLOCKED (Blacklist): Home {homeBuilding} -> Workplace {workplaceBuilding} (INCOMING DISALLOW rule '{rule.Id}')");
+                                return false;
+                            }
+                        }
+                        else // AllowType.Allow
+                        {
+                            // ALLOW = Whitelist: Block if NOT in the list
+                            if (!isInList)
+                            {
+                                Mod.log.Info($"🚫 Worker BLOCKED (Whitelist): Home {homeBuilding} -> Workplace {workplaceBuilding} (INCOMING ALLOW rule '{rule.Id}' - not in allowed list)");
+                                return false;
                             }
                         }
                     }
@@ -224,7 +241,10 @@ namespace ManageResourceChains.Systems
         }
 
         /// <summary>
-        /// Check if transport is allowed between two buildings based on active rules (legacy method)
+        /// Check if transport is allowed between two buildings based on active rules.
+        /// NEW LOGIC:
+        /// - DISALLOW = Blacklist (allow everything EXCEPT listed buildings)
+        /// - ALLOW = Whitelist (allow ONLY listed buildings, block everything else)
         /// </summary>
         /// <param name="sourceBuilding">Source building entity</param>
         /// <param name="targetBuilding">Target building entity</param>
@@ -232,39 +252,66 @@ namespace ManageResourceChains.Systems
         /// <returns>True if transport is allowed</returns>
         public bool IsTransportAllowed(int sourceBuilding, int targetBuilding, TransportType transportType)
         {
-            // Get rules for both source and target buildings
-            var sourceRules = GetApplicableRules(sourceBuilding, transportType, true);
-            var targetRules = GetApplicableRules(targetBuilding, transportType, false);
+            var allConfigs = m_ResourceChainManagementSystem.GetAllConfigurations();
+            if (allConfigs == null || allConfigs.Count == 0)
+                return true; // No rules, allow everything
             
-            // Check source rules (Outgoing)
-            foreach (var rule in sourceRules)
+            // Check all configurations for applicable rules
+            foreach (var config in allConfigs.Values)
             {
-                if (rule.Type == ChainType.Outgoing)
+                foreach (var rule in config.Rules)
                 {
-                    if (rule.Buildings.Contains(targetBuilding))
+                    // Skip if not matching transport type
+                    if (rule.TransportType != transportType)
+                        continue;
+                    
+                    // Check OUTGOING rules from SOURCE
+                    if (rule.Type == ChainType.Outgoing && config.BuildingEntityId == sourceBuilding)
                     {
-                        // This rule specifically mentions the target
+                        bool isInList = rule.Buildings.Contains(targetBuilding);
+                        
                         if (rule.Allow == AllowType.Disallow)
                         {
-                            Mod.log.Info($"Transport blocked by source rule {rule.Id}: {sourceBuilding} -> {targetBuilding}");
-                            return false;
+                            // DISALLOW = Blacklist: Block if IN the list
+                            if (isInList)
+                            {
+                                Mod.log.Info($"🚫 Transport BLOCKED (Blacklist): Source {sourceBuilding} -> Target {targetBuilding} (OUTGOING DISALLOW rule '{rule.Id}')");
+                                return false;
+                            }
+                        }
+                        else // AllowType.Allow
+                        {
+                            // ALLOW = Whitelist: Block if NOT in the list
+                            if (!isInList)
+                            {
+                                Mod.log.Info($"🚫 Transport BLOCKED (Whitelist): Source {sourceBuilding} -> Target {targetBuilding} (OUTGOING ALLOW rule '{rule.Id}' - not in allowed list)");
+                                return false;
+                            }
                         }
                     }
-                }
-            }
-            
-            // Check target rules (Incoming)
-            foreach (var rule in targetRules)
-            {
-                if (rule.Type == ChainType.Incoming)
-                {
-                    if (rule.Buildings.Contains(sourceBuilding))
+                    
+                    // Check INCOMING rules to TARGET
+                    if (rule.Type == ChainType.Incoming && config.BuildingEntityId == targetBuilding)
                     {
-                        // This rule specifically mentions the source
+                        bool isInList = rule.Buildings.Contains(sourceBuilding);
+                        
                         if (rule.Allow == AllowType.Disallow)
                         {
-                            Mod.log.Info($"Transport blocked by target rule {rule.Id}: {sourceBuilding} -> {targetBuilding}");
-                            return false;
+                            // DISALLOW = Blacklist: Block if IN the list
+                            if (isInList)
+                            {
+                                Mod.log.Info($"🚫 Transport BLOCKED (Blacklist): Source {sourceBuilding} -> Target {targetBuilding} (INCOMING DISALLOW rule '{rule.Id}')");
+                                return false;
+                            }
+                        }
+                        else // AllowType.Allow
+                        {
+                            // ALLOW = Whitelist: Block if NOT in the list
+                            if (!isInList)
+                            {
+                                Mod.log.Info($"🚫 Transport BLOCKED (Whitelist): Source {sourceBuilding} -> Target {targetBuilding} (INCOMING ALLOW rule '{rule.Id}' - not in allowed list)");
+                                return false;
+                            }
                         }
                     }
                 }

@@ -146,14 +146,14 @@ public class ResourceChainRule
 
 ### Overview
 
-The mod now includes a fully functional **Worker Restriction System** that actively enforces rules preventing citizens from working at specific buildings based on configured DISALLOW rules.
+The mod now includes a fully functional **Worker Restriction System** that actively enforces rules preventing or allowing citizens to work at specific buildings based on configured rules using a whitelist/blacklist approach.
 
 ### Implementation Approach
 
 **Post-Employment Validation with Active Enforcement**:
 - Workers are hired normally through the game's standard pathfinding system
 - A dedicated enforcement system (`ResourceChainPathfindSystem`) periodically checks all workers every ~2 seconds
-- Workers violating DISALLOW rules are immediately removed from their workplace and become unemployed
+- Workers violating rules are immediately removed from their workplace and become unemployed
 - This approach is compatible with other mods and doesn't interfere with the game's core pathfinding
 
 ### How It Works
@@ -162,30 +162,52 @@ The `ResourceChainPathfindSystem` runs in the `GameSimulation` phase and:
 
 1. **Queries all workers** in the game using ECS entity queries
 2. **Gets each worker's home and workplace** by following the component relationships (Worker → HouseholdMember → PropertyRenter)
-3. **Checks rules** to see if the worker-workplace combination is allowed
+3. **Checks rules** to see if the worker-workplace combination is allowed using whitelist/blacklist logic
 4. **Removes violating workers** from the workplace's employee list and removes their Worker component
+
+### Rule Logic (Whitelist/Blacklist)
+
+**DISALLOW = Blacklist** (Allow everything EXCEPT listed buildings):
+- When you DISALLOW buildings, workers can go to ANY workplace EXCEPT the ones you picked
+- Example: "Citizens can work anywhere except Factory A and Factory B"
+
+**ALLOW = Whitelist** (Allow ONLY listed buildings):
+- When you ALLOW buildings, workers can ONLY go to the buildings you picked
+- Example: "Citizens can ONLY work at Office A and Office B, nowhere else"
 
 ### Rule Types
 
 **OUTGOING Rules** (applied to residential buildings):
-- Restricts where residents of a building can work
-- If a home building has an OUTGOING + DISALLOW rule, residents cannot work at buildings in the rule's building list
+- Controls where residents of a building can work
+- DISALLOW: Residents can work anywhere EXCEPT the listed workplaces (blacklist)
+- ALLOW: Residents can ONLY work at the listed workplaces (whitelist)
 
 **INCOMING Rules** (applied to workplace buildings):
-- Restricts who can work at a building
-- If a workplace has an INCOMING + DISALLOW rule, workers from homes in the rule's building list cannot work there
+- Controls who can work at a building
+- DISALLOW: Workers from listed homes CANNOT work here (blacklist specific homes)
+- ALLOW: ONLY workers from listed homes can work here (whitelist specific homes)
 
 ### Example Usage
 
-**Scenario 1**: Prevent residents of Building A from working at Factory B and Factory C
+**Scenario 1**: Prevent residents of Building A from working at Factory B and Factory C (Blacklist)
 - Create an OUTGOING + DISALLOW + Workers rule on Building A
 - Add Factory B and Factory C to the buildings list
-- Result: Citizens from Building A will be removed from those factories and cannot return
+- Result: Citizens from Building A can work ANYWHERE except Factory B and Factory C
 
-**Scenario 2**: Restrict Office Building X to exclude workers from specific residential areas
+**Scenario 2**: Restrict residents of Building A to ONLY work at Office X and Office Y (Whitelist)
+- Create an OUTGOING + ALLOW + Workers rule on Building A
+- Add Office X and Office Y to the buildings list
+- Result: Citizens from Building A can ONLY work at Office X and Office Y, nowhere else
+
+**Scenario 3**: Block specific residential areas from Office Building X (Blacklist)
 - Create an INCOMING + DISALLOW + Workers rule on Office X
 - Add the unwanted residential buildings to the list
-- Result: Workers from those homes are removed and cannot work at Office X
+- Result: Workers from those specific homes cannot work at Office X, but everyone else can
+
+**Scenario 4**: Restrict Office Building X to ONLY workers from premium residential areas (Whitelist)
+- Create an INCOMING + ALLOW + Workers rule on Office X
+- Add the premium residential buildings to the list
+- Result: ONLY workers from those specific homes can work at Office X
 
 ### Performance
 
@@ -204,11 +226,10 @@ Rules are persisted per-building in JSON files:
 
 ### Current Limitations
 
-1. Only DISALLOW rules are actively enforced (ALLOW rules are passive)
-2. Workers are removed after being hired, not prevented from hiring initially
-3. No filtering by education level or worker type
-4. No time-based or conditional rules
-5. District-based rules not yet implemented
+1. Workers are removed after being hired, not prevented from hiring initially
+2. No filtering by education level or worker type
+3. No time-based or conditional rules
+4. District-based rules not yet implemented
 
 ### Future Enhancements
 
