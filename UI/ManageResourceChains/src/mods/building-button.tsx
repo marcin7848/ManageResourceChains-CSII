@@ -6,6 +6,9 @@ import { getModule } from "cs2/modding";
 import { Dropdown, DropdownToggle, Panel, Scrollable } from "cs2/ui";
 import { Color } from "cs2/bindings";
 
+// Get the DescriptionTooltip component for proper tooltips
+const DescriptionTooltip = getModule("game-ui/common/tooltip/description-tooltip/description-tooltip.tsx", "DescriptionTooltip");
+
 // Get DropdownItem dynamically to avoid TypeScript type/value confusion
 // @ts-ignore
 const UI = require("cs2/ui");
@@ -81,14 +84,9 @@ const ResourceChainRuleComponent: React.FC<{
         }
     }, [buildingPickerActive, isPickingBuildings]);
     
-    const toggleBuildingPicker = () => {
-        if (isPickingBuildings) {
-            // Stop picking
-            console.log("🛑 Stopping building picker for rule:", rule.id);
-            setIsPickingBuildings(false);
-            trigger("manageResourceChains", "confirmBuildingPicker");
-        } else {
-            // Start picking
+    const startBuildingPicker = () => {
+        // Only start picking if not already picking
+        if (!isPickingBuildings) {
             console.log("🎯 Starting building picker for rule:", rule.id);
             setIsPickingBuildings(true);
             trigger("manageResourceChains", "startBuildingPicker", entityId, rule.id);
@@ -285,18 +283,20 @@ const ResourceChainRuleComponent: React.FC<{
                         <span>Buildings / Districts</span>
                         <div style={{ display: 'flex', gap: '8rem' }}>
                             <button
-                                onClick={toggleBuildingPicker}
+                                onClick={startBuildingPicker}
+                                disabled={isPickingBuildings}
                                 style={{
                                     padding: '2rem 6rem',
                                     backgroundColor: isPickingBuildings ? 'rgba(255,165,0,0.5)' : 'rgba(0,150,255,0.3)',
                                     border: `1px solid ${isPickingBuildings ? 'rgba(255,165,0,0.8)' : 'rgba(0,150,255,0.5)'}`,
                                     borderRadius: '2rem',
                                     color: 'white',
-                                    cursor: 'pointer',
+                                    cursor: isPickingBuildings ? 'not-allowed' : 'pointer',
                                     fontSize: '10rem',
-                                    fontWeight: isPickingBuildings ? 'bold' : 'normal'
+                                    fontWeight: isPickingBuildings ? 'bold' : 'normal',
+                                    opacity: isPickingBuildings ? 0.6 : 1
                                 }}
-                                title={isPickingBuildings ? 'Click to stop picking buildings' : 'Click to start picking buildings'}
+                                title={isPickingBuildings ? 'Picking mode active - click on buildings in the game' : 'Click to start picking buildings'}
                             >
                                 {isPickingBuildings ? '🎯 Picking...' : '+ Building'}
                             </button>
@@ -687,6 +687,11 @@ const ManageResourceChainsPanel: React.FC<{ entityId: number; onClose: () => voi
             const json = JSON.stringify(config);
             trigger("manageResourceChains", "saveBuildingConfig", entityId, json);
             console.log("Configuration saved successfully");
+            
+            // Close the panel after saving
+            setTimeout(() => {
+                onClose();
+            }, 100); // Small delay to ensure save is triggered
         } catch (error) {
             console.error("Error saving config:", error);
         }
@@ -753,9 +758,45 @@ const ManageResourceChainsPanel: React.FC<{ entityId: number; onClose: () => voi
                     right: '20rem',
                     width: '450rem',
                     maxHeight: 'calc(100vh - 100rem)',
-                    opacity: buildingPickerActive ? 0.8 : 1 // Dim panel slightly when picking for visual feedback
+                    opacity: buildingPickerActive ? 0.7 : 1,
+                    backgroundColor: buildingPickerActive ? 'rgba(0,0,0,0.6)' : undefined
+                }}
+                onClick={(e) => {
+                    // Handle clicks on the panel to finish picking mode
+                    if (buildingPickerActive) {
+                        console.log("✅ Panel clicked while picking - finishing building picker");
+                        trigger("manageResourceChains", "confirmBuildingPicker");
+                        e.stopPropagation(); // Prevent event from bubbling
+                    }
                 }}
             >
+                {/* Overlay message when picking buildings - inside Panel but above content */}
+                {buildingPickerActive && (
+                    <div style={{
+                        position: 'absolute',
+                        top: '0',
+                        left: '0',
+                        right: '0',
+                        padding: '20rem 10rem',
+                        backgroundColor: 'rgba(255, 165, 0, 0.95)',
+                        color: 'white',
+                        textAlign: 'center',
+                        fontSize: '18rem',
+                        fontWeight: 'bold',
+                        zIndex: 10000,
+                        borderRadius: '8rem 8rem 0 0',
+                        boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
+                        pointerEvents: 'none',
+                        cursor: 'pointer'
+                    }}>
+                        Click anywhere on the panel to finish
+                    </div>
+                )}
+                
+                <div style={{ 
+                    paddingTop: buildingPickerActive ? '60rem' : '0', // Add padding when overlay is visible
+                    transition: 'padding-top 0.2s ease'
+                }}>
                     <Scrollable>
                     {isLoading ? (
                         <div style={{ padding: '20rem', textAlign: 'center', color: 'rgba(255,255,255,0.7)' }}>
@@ -833,30 +874,30 @@ const ManageResourceChainsPanel: React.FC<{ entityId: number; onClose: () => voi
                                     </div>
                                 )}
                                 
-                                {config && Array.isArray(config.rules) && config.rules.length > 0 && (
-                                    <div style={{ padding: '10rem', display: 'flex', justifyContent: 'center', marginTop: '10rem' }}>
-                                        <button 
-                                            onClick={saveAllConfig}
-                                            style={{ 
-                                                padding: '8rem 40rem',
-                                                backgroundColor: 'rgba(0, 200, 0, 0.6)',
-                                                border: '2px solid rgba(0, 255, 0, 0.8)',
-                                                borderRadius: '4rem',
-                                                color: 'white',
-                                                cursor: 'pointer',
-                                                fontSize: '16rem',
-                                                fontWeight: 'bold',
-                                                boxShadow: '0 2px 8px rgba(0,0,0,0.3)'
-                                            }}
-                                        >
-                                            Save All Changes
-                                        </button>
-                                    </div>
-                                )}
+                                {/* Save All Changes button - always visible */}
+                                <div style={{ padding: '10rem', display: 'flex', justifyContent: 'center', marginTop: '10rem' }}>
+                                    <button 
+                                        onClick={saveAllConfig}
+                                        style={{ 
+                                            padding: '8rem 40rem',
+                                            backgroundColor: 'rgba(0, 200, 0, 0.6)',
+                                            border: '2px solid rgba(0, 255, 0, 0.8)',
+                                            borderRadius: '4rem',
+                                            color: 'white',
+                                            cursor: 'pointer',
+                                            fontSize: '16rem',
+                                            fontWeight: 'bold',
+                                            boxShadow: '0 2px 8px rgba(0,0,0,0.3)'
+                                        }}
+                                    >
+                                        Save All Changes
+                                    </button>
+                                </div>
                             </div>
                         </div>
                     )}
-                </Scrollable>
+                    </Scrollable>
+                </div>
             </Panel>
         </>
     );
@@ -865,17 +906,19 @@ const ManageResourceChainsPanel: React.FC<{ entityId: number; onClose: () => voi
 // The actual button component using React/JSX (like FirstPersonCamera)
 const ManageResourceChainsButton: React.FC<{ onOpenPanel: () => void }> = ({ onOpenPanel }) => {
     return (
-        <button
-            style={{ marginLeft: '6rem', marginRight: '8rem' }}
-            className="button_Z9O button_ECf item_It6 item-mouse-states_Fmi item-selected_tAM item-focused_FuT button_xGY"
-            onClick={onOpenPanel}
-        >
-            <img 
-                className="icon_Tdt icon_soN icon_Iwk" 
-                src="coui://uil/Colored/DeliveryVan.svg"
-                alt="Manage Resource Chains"
-            />
-        </button>
+        <DescriptionTooltip title="Manage Resource Chains" description="Configure worker, service, and resource transport rules for this building">
+            <button
+                style={{ marginLeft: '6rem', marginRight: '8rem' }}
+                className="button_Z9O button_ECf item_It6 item-mouse-states_Fmi item-selected_tAM item-focused_FuT button_xGY"
+                onClick={onOpenPanel}
+            >
+                <img 
+                    className="icon_Tdt icon_soN icon_Iwk" 
+                    src="coui://uil/Colored/DeliveryVan.svg"
+                    alt="Manage Resource Chains"
+                />
+            </button>
+        </DescriptionTooltip>
     );
 };
 
