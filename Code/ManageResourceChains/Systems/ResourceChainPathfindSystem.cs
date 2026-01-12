@@ -68,19 +68,23 @@ namespace ManageResourceChains.Systems
 
         /// <summary>
         /// Get the district entity that a building belongs to (if any)
+        /// Uses ComponentLookup to properly check for CurrentDistrict component
         /// </summary>
-        private Entity GetBuildingDistrict(Entity building)
+        private Entity GetBuildingDistrict(Entity building, ComponentLookup<CurrentDistrict> currentDistrictLookup)
         {
-            Mod.log.Info($"🔍 GetBuildingDistrict for building {building.Index}");
+            // Check if entity exists and has CurrentDistrict component
+            if (!EntityManager.Exists(building))
+                return Entity.Null;
             
-            if (EntityManager.HasComponent<CurrentDistrict>(building))
+            if (currentDistrictLookup.HasComponent(building))
             {
-                var currentDistrict = EntityManager.GetComponentData<CurrentDistrict>(building);
-                Mod.log.Info($"  ✓ Building {building.Index} belongs to district {currentDistrict.m_District.Index}");
-                return currentDistrict.m_District;
+                var currentDistrict = currentDistrictLookup[building];
+                if (currentDistrict.m_District != Entity.Null && EntityManager.Exists(currentDistrict.m_District))
+                {
+                    return currentDistrict.m_District;
+                }
             }
             
-            Mod.log.Info($"  ✗ Building {building.Index} has no CurrentDistrict component");
             return Entity.Null;
         }
 
@@ -102,13 +106,12 @@ namespace ManageResourceChains.Systems
             var propertyRenterLookup = GetComponentLookup<PropertyRenter>(true);
             var buildingLookup = GetComponentLookup<Building>(true);
             var employeeBufferLookup = GetBufferLookup<Employee>(false);
+            var currentDistrictLookup = GetComponentLookup<CurrentDistrict>(true);
 
             // Iterate through all workers
             var workers = m_WorkerQuery.ToEntityArray(Allocator.Temp);
             var workerComponents = m_WorkerQuery.ToComponentDataArray<Worker>(Allocator.Temp);
             var householdMembers = m_WorkerQuery.ToComponentDataArray<HouseholdMember>(Allocator.Temp);
-
-            int removedCount = 0;
             
             for (int i = 0; i < workers.Length; i++)
             {
@@ -135,12 +138,10 @@ namespace ManageResourceChains.Systems
                 int homeId = homeBuilding.Index;
                 int workplaceId = workplace.Index;
                 
-                bool isAllowed = IsWorkerTransportAllowed(homeId, workplaceId, TransportType.Workers);
+                bool isAllowed = IsWorkerTransportAllowed(homeId, workplaceId, TransportType.Workers, homeBuilding, workplace, currentDistrictLookup);
                 
                 if (!isAllowed)
                 {
-                    Mod.log.Info($"🚫 [WORKER RESTRICTION] Removing worker {citizenEntity.Index} from workplace {workplaceId}. Home: {homeId}");
-                    
                     // Remove worker from the workplace's employee list
                     if (employeeBufferLookup.HasBuffer(workplace))
                     {
@@ -150,7 +151,6 @@ namespace ManageResourceChains.Systems
                             if (employees[j].m_Worker == citizenEntity)
                             {
                                 employees.RemoveAt(j);
-                                Mod.log.Info($"  ✓ Removed from employee list at index {j}");
                                 break;
                             }
                         }
@@ -158,15 +158,7 @@ namespace ManageResourceChains.Systems
                     
                     // Remove Worker component from citizen
                     ecb.RemoveComponent<Worker>(citizenEntity);
-                    removedCount++;
-                    
-                    Mod.log.Info($"  ✓ Worker component removed, citizen is now unemployed");
                 }
-            }
-
-            if (removedCount > 0)
-            {
-                Mod.log.Info($"✅ [WORKER ENFORCEMENT] Removed {removedCount} workers from disallowed workplaces");
             }
 
             workers.Dispose();
@@ -184,13 +176,15 @@ namespace ManageResourceChains.Systems
         /// <param name="homeBuilding">Home building entity ID</param>
         /// <param name="workplaceBuilding">Workplace building entity ID</param>
         /// <param name="transportType">Type of transport (should be Workers)</param>
+        /// <param name="homeEntity">Home building entity (for district lookup)</param>
+        /// <param name="workplaceEntity">Workplace building entity (for district lookup)</param>
+        /// <param name="currentDistrictLookup">ComponentLookup for CurrentDistrict</param>
         /// <returns>True if transport is allowed</returns>
-        public bool IsWorkerTransportAllowed(int homeBuilding, int workplaceBuilding, TransportType transportType)
+        public bool IsWorkerTransportAllowed(int homeBuilding, int workplaceBuilding, TransportType transportType,
+            Entity homeEntity, Entity workplaceEntity, ComponentLookup<CurrentDistrict> currentDistrictLookup)
         {
             if (transportType != TransportType.Workers)
                 return true; // Only enforce worker restrictions for now
-
-            Mod.log.Info($"🔎 Checking worker transport: Home {homeBuilding} -> Workplace {workplaceBuilding}");
 
             // Get all building configurations
             var buildingConfigs = m_ResourceChainManagementSystem.GetAllConfigurations();
@@ -198,22 +192,16 @@ namespace ManageResourceChains.Systems
             // Get all district configurations
             var districtConfigs = m_ResourceChainManagementSystem.GetAllDistrictConfigurations();
             
-            Mod.log.Info($"  Building configs: {buildingConfigs?.Count ?? 0}, District configs: {districtConfigs?.Count ?? 0}");
-            
             if ((buildingConfigs == null || buildingConfigs.Count == 0) && 
                 (districtConfigs == null || districtConfigs.Count == 0))
             {
-                Mod.log.Info($"  No rules configured, allowing");
                 return true; // No rules, allow everything
             }
 
-            // Convert building IDs to entities to check districts
-            Entity homeEntity = new Entity { Index = homeBuilding, Version = 0 };
-            Entity workplaceEntity = new Entity { Index = workplaceBuilding, Version = 0 };
-            
             // Get districts for both buildings
-            Entity homeDistrict = GetBuildingDistrict(homeEntity);
-            Entity workplaceDistrict = GetBuildingDistrict(workplaceEntity);
+            Entity homeDistrict = GetBuildingDistrict(homeEntity, currentDistrictLookup);
+            Entity workplaceDistrict = GetBuildingDistrict(workplaceEntity, currentDistrictLookup);
+
 
             // Check BUILDING-LEVEL rules first (they take priority)
             if (buildingConfigs != null)
@@ -236,7 +224,6 @@ namespace ManageResourceChains.Systems
                                 // DISALLOW = Blacklist: Block if IN the list
                                 if (isInList)
                                 {
-                                    Mod.log.Info($"🚫 Worker BLOCKED (Building Blacklist): Home {homeBuilding} -> Workplace {workplaceBuilding} (OUTGOING DISALLOW rule '{rule.Id}')");
                                     return false;
                                 }
                             }
@@ -245,7 +232,6 @@ namespace ManageResourceChains.Systems
                                 // ALLOW = Whitelist: Block if NOT in the list
                                 if (!isInList)
                                 {
-                                    Mod.log.Info($"🚫 Worker BLOCKED (Building Whitelist): Home {homeBuilding} -> Workplace {workplaceBuilding} (OUTGOING ALLOW rule '{rule.Id}' - not in allowed list)");
                                     return false;
                                 }
                             }
@@ -261,7 +247,6 @@ namespace ManageResourceChains.Systems
                                 // DISALLOW = Blacklist: Block if IN the list
                                 if (isInList)
                                 {
-                                    Mod.log.Info($"🚫 Worker BLOCKED (Building Blacklist): Home {homeBuilding} -> Workplace {workplaceBuilding} (INCOMING DISALLOW rule '{rule.Id}')");
                                     return false;
                                 }
                             }
@@ -270,7 +255,6 @@ namespace ManageResourceChains.Systems
                                 // ALLOW = Whitelist: Block if NOT in the list
                                 if (!isInList)
                                 {
-                                    Mod.log.Info($"🚫 Worker BLOCKED (Building Whitelist): Home {homeBuilding} -> Workplace {workplaceBuilding} (INCOMING ALLOW rule '{rule.Id}' - not in allowed list)");
                                     return false;
                                 }
                             }
@@ -282,36 +266,25 @@ namespace ManageResourceChains.Systems
             // Check DISTRICT-LEVEL rules (apply if building has no specific rules)
             if (districtConfigs != null)
             {
-                Mod.log.Info($"  Checking district rules...");
-                
                 // Check home district rules (OUTGOING)
                 if (homeDistrict != Entity.Null && districtConfigs.TryGetValue(homeDistrict.Index, out var homeDistrictConfig))
                 {
-                    Mod.log.Info($"  Home district {homeDistrict.Index} has {homeDistrictConfig.Rules.Count} rules");
-                    
                     foreach (var rule in homeDistrictConfig.Rules)
                     {
                         // Skip if not a worker rule
                         if (rule.TransportType != TransportType.Workers)
-                        {
-                            Mod.log.Info($"    Rule {rule.Id}: Skipping (not a worker rule, type={rule.TransportType})");
                             continue;
-                        }
-
-                        Mod.log.Info($"    Rule {rule.Id}: Type={rule.Type}, Allow={rule.Allow}, Buildings={rule.Buildings.Count}");
 
                         // Check OUTGOING rules from HOME DISTRICT
                         if (rule.Type == ChainType.Outgoing)
                         {
                             bool isInList = rule.Buildings.Contains(workplaceBuilding);
-                            Mod.log.Info($"    Workplace {workplaceBuilding} in list: {isInList}");
                             
                             if (rule.Allow == AllowType.Disallow)
                             {
                                 // DISALLOW = Blacklist: Block if IN the list
                                 if (isInList)
                                 {
-                                    Mod.log.Info($"🚫 Worker BLOCKED (District Blacklist): Home {homeBuilding} (District {homeDistrict.Index}) -> Workplace {workplaceBuilding} (OUTGOING DISALLOW rule '{rule.Id}')");
                                     return false;
                                 }
                             }
@@ -320,24 +293,11 @@ namespace ManageResourceChains.Systems
                                 // ALLOW = Whitelist: Block if NOT in the list
                                 if (!isInList)
                                 {
-                                    Mod.log.Info($"🚫 Worker BLOCKED (District Whitelist): Home {homeBuilding} (District {homeDistrict.Index}) -> Workplace {workplaceBuilding} (OUTGOING ALLOW rule '{rule.Id}' - not in allowed list)");
                                     return false;
                                 }
                             }
                         }
-                        else
-                        {
-                            Mod.log.Info($"    Rule {rule.Id}: Not an outgoing rule");
-                        }
                     }
-                }
-                else if (homeDistrict != Entity.Null)
-                {
-                    Mod.log.Info($"  Home district {homeDistrict.Index} has no configuration");
-                }
-                else
-                {
-                    Mod.log.Info($"  Home building not in any district");
                 }
 
                 // Check workplace district rules (INCOMING)
@@ -359,7 +319,6 @@ namespace ManageResourceChains.Systems
                                 // DISALLOW = Blacklist: Block if IN the list
                                 if (isInList)
                                 {
-                                    Mod.log.Info($"🚫 Worker BLOCKED (District Blacklist): Home {homeBuilding} -> Workplace {workplaceBuilding} (District {workplaceDistrict.Index}) (INCOMING DISALLOW rule '{rule.Id}')");
                                     return false;
                                 }
                             }
@@ -368,7 +327,6 @@ namespace ManageResourceChains.Systems
                                 // ALLOW = Whitelist: Block if NOT in the list
                                 if (!isInList)
                                 {
-                                    Mod.log.Info($"🚫 Worker BLOCKED (District Whitelist): Home {homeBuilding} -> Workplace {workplaceBuilding} (District {workplaceDistrict.Index}) (INCOMING ALLOW rule '{rule.Id}' - not in allowed list)");
                                     return false;
                                 }
                             }
@@ -388,11 +346,15 @@ namespace ManageResourceChains.Systems
         /// - DISALLOW = Blacklist (allow everything EXCEPT listed buildings)
         /// - ALLOW = Whitelist (allow ONLY listed buildings, block everything else)
         /// </summary>
-        /// <param name="sourceBuilding">Source building entity</param>
-        /// <param name="targetBuilding">Target building entity</param>
+        /// <param name="sourceBuilding">Source building entity ID</param>
+        /// <param name="targetBuilding">Target building entity ID</param>
         /// <param name="transportType">Type of transport (Workers/Services/Resources)</param>
+        /// <param name="sourceEntity">Source building entity (for district lookup)</param>
+        /// <param name="targetEntity">Target building entity (for district lookup)</param>
+        /// <param name="currentDistrictLookup">ComponentLookup for CurrentDistrict</param>
         /// <returns>True if transport is allowed</returns>
-        public bool IsTransportAllowed(int sourceBuilding, int targetBuilding, TransportType transportType)
+        public bool IsTransportAllowed(int sourceBuilding, int targetBuilding, TransportType transportType,
+            Entity sourceEntity, Entity targetEntity, ComponentLookup<CurrentDistrict> currentDistrictLookup)
         {
             // Get all building configurations
             var buildingConfigs = m_ResourceChainManagementSystem.GetAllConfigurations();
@@ -404,13 +366,9 @@ namespace ManageResourceChains.Systems
                 (districtConfigs == null || districtConfigs.Count == 0))
                 return true; // No rules, allow everything
 
-            // Convert building IDs to entities to check districts
-            Entity sourceEntity = new Entity { Index = sourceBuilding, Version = 0 };
-            Entity targetEntity = new Entity { Index = targetBuilding, Version = 0 };
-            
             // Get districts for both buildings
-            Entity sourceDistrict = GetBuildingDistrict(sourceEntity);
-            Entity targetDistrict = GetBuildingDistrict(targetEntity);
+            Entity sourceDistrict = GetBuildingDistrict(sourceEntity, currentDistrictLookup);
+            Entity targetDistrict = GetBuildingDistrict(targetEntity, currentDistrictLookup);
             
             // Check BUILDING-LEVEL rules first (they take priority)
             if (buildingConfigs != null)
@@ -433,7 +391,6 @@ namespace ManageResourceChains.Systems
                                 // DISALLOW = Blacklist: Block if IN the list
                                 if (isInList)
                                 {
-                                    Mod.log.Info($"🚫 Transport BLOCKED (Building Blacklist): Source {sourceBuilding} -> Target {targetBuilding} (OUTGOING DISALLOW rule '{rule.Id}')");
                                     return false;
                                 }
                             }
@@ -442,7 +399,6 @@ namespace ManageResourceChains.Systems
                                 // ALLOW = Whitelist: Block if NOT in the list
                                 if (!isInList)
                                 {
-                                    Mod.log.Info($"🚫 Transport BLOCKED (Building Whitelist): Source {sourceBuilding} -> Target {targetBuilding} (OUTGOING ALLOW rule '{rule.Id}' - not in allowed list)");
                                     return false;
                                 }
                             }
@@ -458,7 +414,6 @@ namespace ManageResourceChains.Systems
                                 // DISALLOW = Blacklist: Block if IN the list
                                 if (isInList)
                                 {
-                                    Mod.log.Info($"🚫 Transport BLOCKED (Building Blacklist): Source {sourceBuilding} -> Target {targetBuilding} (INCOMING DISALLOW rule '{rule.Id}')");
                                     return false;
                                 }
                             }
@@ -467,7 +422,6 @@ namespace ManageResourceChains.Systems
                                 // ALLOW = Whitelist: Block if NOT in the list
                                 if (!isInList)
                                 {
-                                    Mod.log.Info($"🚫 Transport BLOCKED (Building Whitelist): Source {sourceBuilding} -> Target {targetBuilding} (INCOMING ALLOW rule '{rule.Id}' - not in allowed list)");
                                     return false;
                                 }
                             }
@@ -498,7 +452,6 @@ namespace ManageResourceChains.Systems
                                 // DISALLOW = Blacklist: Block if IN the list
                                 if (isInList)
                                 {
-                                    Mod.log.Info($"🚫 Transport BLOCKED (District Blacklist): Source {sourceBuilding} (District {sourceDistrict.Index}) -> Target {targetBuilding} (OUTGOING DISALLOW rule '{rule.Id}')");
                                     return false;
                                 }
                             }
@@ -507,7 +460,6 @@ namespace ManageResourceChains.Systems
                                 // ALLOW = Whitelist: Block if NOT in the list
                                 if (!isInList)
                                 {
-                                    Mod.log.Info($"🚫 Transport BLOCKED (District Whitelist): Source {sourceBuilding} (District {sourceDistrict.Index}) -> Target {targetBuilding} (OUTGOING ALLOW rule '{rule.Id}' - not in allowed list)");
                                     return false;
                                 }
                             }
@@ -534,7 +486,6 @@ namespace ManageResourceChains.Systems
                                 // DISALLOW = Blacklist: Block if IN the list
                                 if (isInList)
                                 {
-                                    Mod.log.Info($"🚫 Transport BLOCKED (District Blacklist): Source {sourceBuilding} -> Target {targetBuilding} (District {targetDistrict.Index}) (INCOMING DISALLOW rule '{rule.Id}')");
                                     return false;
                                 }
                             }
@@ -543,7 +494,6 @@ namespace ManageResourceChains.Systems
                                 // ALLOW = Whitelist: Block if NOT in the list
                                 if (!isInList)
                                 {
-                                    Mod.log.Info($"🚫 Transport BLOCKED (District Whitelist): Source {sourceBuilding} -> Target {targetBuilding} (District {targetDistrict.Index}) (INCOMING ALLOW rule '{rule.Id}' - not in allowed list)");
                                     return false;
                                 }
                             }
@@ -594,9 +544,10 @@ namespace ManageResourceChains.Systems
         /// Calculate a penalty cost for pathfinding based on rules
         /// This can be used to make disallowed paths extremely expensive rather than blocking them entirely
         /// </summary>
-        public float CalculatePathPenalty(int sourceBuilding, int targetBuilding, TransportType transportType)
+        public float CalculatePathPenalty(int sourceBuilding, int targetBuilding, TransportType transportType,
+            Entity sourceEntity, Entity targetEntity, ComponentLookup<CurrentDistrict> currentDistrictLookup)
         {
-            if (!IsTransportAllowed(sourceBuilding, targetBuilding, transportType))
+            if (!IsTransportAllowed(sourceBuilding, targetBuilding, transportType, sourceEntity, targetEntity, currentDistrictLookup))
             {
                 // Return a very high penalty to effectively block the path
                 return 1000000f;

@@ -152,11 +152,157 @@ The mod now includes a fully functional **Worker Restriction System** that activ
 
 **Post-Employment Validation with Active Enforcement**:
 - Workers are hired normally through the game's standard pathfinding system
-- A dedicated enforcement system (`ResourceChainPathfindSystem`) periodically checks all workers every ~2 seconds
+- A dedicated enforcement system (`ResourceChainPathfindSystem`) periodically checks all workers every ~2 seconds (128 frames)
 - Workers violating rules are immediately removed from their workplace and become unemployed
 - This approach is compatible with other mods and doesn't interfere with the game's core pathfinding
 
 ### Building-Level vs District-Level Rules
+
+#### Building-Level Rules (Higher Priority)
+- Applied directly to specific buildings
+- Rules configured on a building entity affect only that building
+- Take precedence over district rules
+- Most precise control
+- Configured via the "Manage Resource Chains" button on individual buildings
+
+#### District-Level Rules (Apply to All Buildings in District)
+- Applied to all buildings within a district boundary
+- Rules configured on a district entity affect every building in that district
+- Used when you want to apply the same rules to an entire neighborhood
+- More efficient for managing large areas
+- Configured via the "Manage Resource Chains" button on district panels
+
+#### Rule Priority Hierarchy
+
+The system checks rules in the following order:
+
+1. **Building-level rules are checked FIRST** (highest priority)
+   - If a building has specific rules, they override district rules
+   - Both OUTGOING (from home) and INCOMING (to workplace) rules are checked
+
+2. **District-level rules are checked SECOND** (lower priority)
+   - Only applied when a building has no specific rules
+   - Both OUTGOING (from home district) and INCOMING (to workplace district) rules are checked
+
+3. **Allow if no rules block it** (default behavior)
+   - If neither building nor district has rules, transport is allowed
+
+### How District Rules Work
+
+#### District Assignment
+- Buildings are automatically assigned to districts based on their geographical location
+- The game's `CurrentDistrict` component on buildings tracks which district they belong to
+- A building can only belong to one district at a time
+- District boundaries are defined by the player using the Area Tool in-game
+
+#### Rule Evaluation Process
+
+When checking if a worker can travel from **Home A** to **Workplace B**:
+
+**Step 1: Check Building-Level Rules**
+1. Does Home A have OUTGOING worker rules? → Check them first
+2. Does Workplace B have INCOMING worker rules? → Check them first
+3. If any building-level rule blocks it → Transport is **DENIED**
+
+**Step 2: Check District-Level Rules** (only if no building rules applied)
+1. Does Home A belong to a district? → Get the district entity from `CurrentDistrict` component
+2. Does that home district have OUTGOING worker rules? → Check them
+3. Does Workplace B belong to a district? → Get the district entity
+4. Does that workplace district have INCOMING worker rules? → Check them
+5. If any district rule blocks it → Transport is **DENIED**
+
+**Step 3: Allow if No Rules Block**
+- If no rules triggered a block, the worker is allowed to work at that location
+
+#### Technical Implementation
+
+```csharp
+// Pseudo-code showing the rule evaluation logic
+Entity homeDistrict = GetBuildingDistrict(homeEntity, currentDistrictLookup);
+Entity workplaceDistrict = GetBuildingDistrict(workplaceEntity, currentDistrictLookup);
+
+// Priority 1: Building-level rules
+foreach (building config with rules)
+{
+    if (config matches home and has OUTGOING rule)
+        → Check if workplace is in the rule's building list
+        → Apply ALLOW/DISALLOW logic
+    
+    if (config matches workplace and has INCOMING rule)
+        → Check if home is in the rule's building list
+        → Apply ALLOW/DISALLOW logic
+}
+
+// Priority 2: District-level rules (only if no building rules matched)
+if (homeDistrict != null && district has OUTGOING rules)
+    → Check if workplace is in the district rule's building list
+    → Apply ALLOW/DISALLOW logic
+
+if (workplaceDistrict != null && district has INCOMING rules)
+    → Check if home is in the district rule's building list
+    → Apply ALLOW/DISALLOW logic
+```
+
+#### Component Relationships
+
+The system uses these ECS components to resolve district membership:
+
+```
+Building Entity
+    └─ CurrentDistrict component
+        └─ m_District field → District Entity
+
+District Entity
+    └─ District component
+        └─ m_OptionMask (district settings)
+```
+
+**Key Methods:**
+- `GetBuildingDistrict(Entity building, ComponentLookup<CurrentDistrict>)` - Returns the district entity for a building
+- Uses `ComponentLookup<CurrentDistrict>` to efficiently query district membership
+- Returns `Entity.Null` if building is not in any district
+
+### Practical Examples
+
+#### Example 1: District-Wide Factory Worker Ban (Blacklist)
+**Setup:**
+- District "Downtown Residential" has an OUTGOING DISALLOW rule for workers
+- Rule lists Factory A, Factory B, and Factory C
+- District contains 50 residential buildings
+
+**Result:**
+- All 50 residential buildings in Downtown will have workers blocked from the 3 factories
+- Workers from Downtown can still work at offices, shops, and other workplaces
+- You can override this for a specific building by adding building-level ALLOW rules
+
+**Use Case:** Keep industrial pollution away from your premium residential district
+
+#### Example 2: Exclusive Industrial Zone (Whitelist)
+**Setup:**
+- District "Industrial Zone" has an INCOMING ALLOW rule for workers
+- Rule lists only the residential buildings within the industrial zone itself
+
+**Result:**
+- Factories in Industrial Zone can ONLY hire workers from local residences
+- Workers from outside the district cannot commute to these factories
+- This creates a self-contained industrial neighborhood
+
+**Use Case:** Reduce traffic by creating self-sufficient industrial zones
+
+#### Example 3: Mixed Rules (Building Overrides District)
+**Setup:**
+- District "Suburbs" has an OUTGOING DISALLOW rule blocking Downtown offices
+- One specific apartment building (Building X) in Suburbs has an OUTGOING ALLOW rule permitting only Downtown offices
+
+**Result:**
+- Most suburban residents cannot work Downtown (district rule)
+- Building X residents can ONLY work Downtown (building rule overrides district)
+- This creates an exception for one upscale apartment with Downtown-commuting residents
+
+**Use Case:** Fine-grained control with district-wide defaults and specific exceptions
+
+
+### How It Works
 
 **Building-Level Rules** (Higher Priority):
 - Applied directly to specific buildings
@@ -257,6 +403,45 @@ The `ResourceChainPathfindSystem` runs in the `GameSimulation` phase and:
 - Add the premium residential buildings to the list
 - Result: ONLY workers from those specific homes can work at Office X
 
+### District-Level Rules
+
+**Overview**:
+District-level rules apply to ALL buildings within a district automatically, providing broader control without managing individual buildings.
+
+**How Districts Work**:
+- Buildings are assigned to districts based on the game's `CurrentDistrict` component
+- The system automatically detects which district a building belongs to
+- District rules complement building-level rules (building rules take priority)
+
+**District Rule Types**:
+
+**OUTGOING District Rules** (applied to residential districts):
+- Controls where ALL residents of the district can work
+- DISALLOW: District residents can work anywhere EXCEPT the listed workplaces (blacklist)
+- ALLOW: District residents can ONLY work at the listed workplaces (whitelist)
+
+**INCOMING District Rules** (applied to commercial/industrial districts):
+- Controls who can work at buildings in the district
+- DISALLOW: Workers from listed buildings CANNOT work in this district (blacklist)
+- ALLOW: ONLY workers from listed buildings can work in this district (whitelist)
+
+**Priority System**:
+1. **Building-specific rules** are checked FIRST and take highest priority
+2. **District-level rules** are checked SECOND as a fallback
+3. If no rules apply, transport is allowed by default
+
+**District Example Usage**:
+
+**Scenario 1**: Prevent entire residential district from working at industrial factories
+- Create an OUTGOING + DISALLOW + Workers rule on residential district
+- Add all industrial factory buildings to the list
+- Result: All residents in the district cannot work at those factories
+
+**Scenario 2**: Restrict premium office district to only high-end residential areas
+- Create an INCOMING + ALLOW + Workers rule on office district
+- Add the premium residential buildings to the allowed list
+- Result: Only workers from those specific homes can work at ANY building in the office district
+
 ### Performance
 
 - System updates every 128 frames (~2 seconds at 60fps)
@@ -264,20 +449,26 @@ The `ResourceChainPathfindSystem` runs in the `GameSimulation` phase and:
 - Only processes when rules are configured
 - Minimal performance impact on most cities
 - Scales well with number of workers
+- District lookups are optimized with ComponentLookup
 
 ### Data Storage
 
-Rules are persisted per-building in JSON files:
+**Building Rules** are persisted in JSON files:
 - Location: `%LocalAppData%Low\Colossal Order\Cities Skylines II\ModsData\ManageResourceChains\`
 - Filename format: `building_{entityId}.json`
 - Contains building ID, rules array with type, allow/disallow, transport type, and target building lists
+
+**District Rules** are persisted in JSON files:
+- Location: `%LocalAppData%Low\Colossal Order\Cities Skylines II\ModsData\ManageResourceChains\`
+- Filename format: `district_{entityId}.json`
+- Contains district ID, rules array with same structure as building rules
 
 ### Current Limitations
 
 1. Workers are removed after being hired, not prevented from hiring initially
 2. No filtering by education level or worker type
 3. No time-based or conditional rules
-4. District-based rules not yet implemented
+4. District detection relies on game's CurrentDistrict component
 
 ### Future Enhancements
 
@@ -286,8 +477,8 @@ Rules are persisted per-building in JSON files:
 - Education level filtering for more granular control
 - Extension to resource deliveries and service vehicles
 - Transport priority system implementation
-- District-based rules instead of only building-based
 - Time-based and conditional rules (day/night, seasonal, etc.)
+- Visual district overlay showing active rules
 
 ---
 
