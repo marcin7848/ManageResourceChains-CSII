@@ -146,7 +146,7 @@ public class ResourceChainRule
 
 ### Overview
 
-The mod now includes a fully functional **Worker Restriction System** that actively enforces rules preventing or allowing citizens to work at specific buildings based on configured rules using a whitelist/blacklist approach.
+The mod now includes a fully functional **Worker Restriction System** that actively enforces rules preventing or allowing citizens to work at specific buildings based on configured rules using a whitelist/blacklist approach. The system supports both **building-level** and **district-level** rules.
 
 ### Implementation Approach
 
@@ -156,14 +156,62 @@ The mod now includes a fully functional **Worker Restriction System** that activ
 - Workers violating rules are immediately removed from their workplace and become unemployed
 - This approach is compatible with other mods and doesn't interfere with the game's core pathfinding
 
+### Building-Level vs District-Level Rules
+
+**Building-Level Rules** (Higher Priority):
+- Applied directly to specific buildings
+- Rules configured on a building entity affect only that building
+- Take precedence over district rules
+- Most precise control
+
+**District-Level Rules** (Apply to All Buildings in District):
+- Applied to all buildings within a district boundary
+- Rules configured on a district entity affect every building in that district
+- Used when you want to apply the same rules to an entire neighborhood
+- More efficient for managing large areas
+
+**Rule Priority**:
+1. Building-level rules are checked FIRST
+2. If a building has specific rules, they override district rules
+3. District rules apply when a building has no specific rules
+4. If neither building nor district has rules, transport is allowed
+
+### How District Rules Work
+
+When checking if a worker can travel from Home A to Workplace B:
+
+1. **Check Building-Level Rules**:
+   - Does Home A have OUTGOING rules? Check them first
+   - Does Workplace B have INCOMING rules? Check them first
+   - If any building-level rule blocks it, transport is denied
+
+2. **Check District-Level Rules** (if no building rules applied):
+   - Does Home A belong to a district? Get the district entity
+   - Does that district have OUTGOING worker rules? Check them
+   - Does Workplace B belong to a district? Get the district entity
+   - Does that district have INCOMING worker rules? Check them
+   - If any district rule blocks it, transport is denied
+
+3. **Allow if no rules block it**
+
+**Example**: 
+- District "Downtown" has an OUTGOING DISALLOW rule for Factory Zone buildings
+- All residential buildings in Downtown will have workers blocked from Factory Zone
+- You can override this for a specific building by adding building-level rules to that building
+
 ### How It Works
 
 The `ResourceChainPathfindSystem` runs in the `GameSimulation` phase and:
 
 1. **Queries all workers** in the game using ECS entity queries
 2. **Gets each worker's home and workplace** by following the component relationships (Worker → HouseholdMember → PropertyRenter)
-3. **Checks rules** to see if the worker-workplace combination is allowed using whitelist/blacklist logic
-4. **Removes violating workers** from the workplace's employee list and removes their Worker component
+3. **Checks if buildings belong to districts** using the `CurrentDistrict` component
+4. **Checks rules** in this order:
+   - Building-level rules for home (OUTGOING)
+   - Building-level rules for workplace (INCOMING)
+   - District-level rules for home district (OUTGOING)
+   - District-level rules for workplace district (INCOMING)
+5. **Removes violating workers** from the workplace's employee list and removes their Worker component
 
 ### Rule Logic (Whitelist/Blacklist)
 

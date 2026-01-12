@@ -324,6 +324,14 @@ namespace ManageResourceChains.Systems
         }
 
         /// <summary>
+        /// Get all district configurations (for use by other systems like pathfinding)
+        /// </summary>
+        public Dictionary<int, Data.BuildingConfiguration> GetAllDistrictConfigurations()
+        {
+            return _districtConfigurations;
+        }
+
+        /// <summary>
         /// Save configurations to file
         /// </summary>
         private void SaveConfigurations()
