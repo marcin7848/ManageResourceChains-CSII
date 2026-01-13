@@ -34,6 +34,7 @@ const isBuildingSelected$ = bindValue<boolean>("manageResourceChains", "isBuildi
 const selectedBuildingEntity$ = bindValue<number>("manageResourceChains", "selectedBuildingEntity", 0);
 const resourceChainConfig$ = bindValue<string>("manageResourceChains", "resourceChainConfig", "{}");
 const buildingPickerActive$ = bindValue<boolean>("manageResourceChains", "buildingPickerActive", false);
+const districtPickerActive$ = bindValue<boolean>("manageResourceChains", "districtPickerActive", false);
 
 // District bindings
 const isDistrictSelected$ = bindValue<boolean>("manageResourceChains", "isDistrictSelected", false);
@@ -74,10 +75,12 @@ const ResourceChainRuleComponent: React.FC<{
     isDistrict?: boolean;  // Optional: true if this is for a district
 }> = ({ rule, entityId, fullConfig, onUpdate, onDelete, isDistrict = false }) => {
     const buildingPickerActive = useValue(buildingPickerActive$);
+    const districtPickerActive = useValue(districtPickerActive$);
+    const anyPickerActive = buildingPickerActive || districtPickerActive;
     
     const startBuildingPicker = () => {
         // Only start picking if not already picking
-        if (!buildingPickerActive) {
+        if (!anyPickerActive) {
             // Save current config to C# memory (not to disk) so the rule exists there
             // This is required for OnBuildingSelected to work
             const json = JSON.stringify(fullConfig);
@@ -87,6 +90,22 @@ const ResourceChainRuleComponent: React.FC<{
             // Small delay to ensure config is updated before starting picker
             setTimeout(() => {
                 trigger("manageResourceChains", "startBuildingPicker", entityId, rule.id, isDistrict);
+            }, 50);
+        }
+    };
+    
+    const startDistrictPicker = () => {
+        // Only start picking if not already picking
+        if (!anyPickerActive) {
+            // Save current config to C# memory (not to disk) so the rule exists there
+            // This is required for OnDistrictSelected to work
+            const json = JSON.stringify(fullConfig);
+            const saveType = isDistrict ? "saveDistrictConfig" : "saveBuildingConfig";
+            trigger("manageResourceChains", saveType, entityId, json);
+            
+            // Small delay to ensure config is updated before starting picker
+            setTimeout(() => {
+                trigger("manageResourceChains", "startDistrictPicker", entityId, rule.id, isDistrict);
             }, 50);
         }
     };
@@ -268,7 +287,8 @@ const ResourceChainRuleComponent: React.FC<{
                 <div style={{ 
                     padding: '8rem',
                     backgroundColor: 'rgba(255,255,255,0.05)',
-                    borderRadius: '3rem'
+                    borderRadius: '3rem',
+                    position: 'relative'
                 }}>
                     <div style={{ 
                         display: 'flex', 
@@ -282,35 +302,39 @@ const ResourceChainRuleComponent: React.FC<{
                         <div style={{ display: 'flex', gap: '8rem' }}>
                             <button
                                 onClick={startBuildingPicker}
-                                disabled={buildingPickerActive}
+                                disabled={anyPickerActive}
                                 style={{
                                     padding: '2rem 6rem',
                                     backgroundColor: buildingPickerActive ? 'rgba(255,165,0,0.5)' : 'rgba(0,150,255,0.3)',
                                     border: `1px solid ${buildingPickerActive ? 'rgba(255,165,0,0.8)' : 'rgba(0,150,255,0.5)'}`,
                                     borderRadius: '2rem',
                                     color: 'white',
-                                    cursor: buildingPickerActive ? 'not-allowed' : 'pointer',
+                                    cursor: anyPickerActive ? 'not-allowed' : 'pointer',
                                     fontSize: '10rem',
                                     fontWeight: buildingPickerActive ? 'bold' : 'normal',
-                                    opacity: buildingPickerActive ? 0.6 : 1
+                                    opacity: anyPickerActive ? 0.6 : 1
                                 }}
                                 title={buildingPickerActive ? 'Picking mode active - click on buildings in the game' : 'Click to start picking buildings'}
                             >
                                 {buildingPickerActive ? '🎯 Picking...' : '+ Building'}
                             </button>
                             <button
+                                onClick={startDistrictPicker}
+                                disabled={anyPickerActive}
                                 style={{
                                     padding: '2rem 6rem',
-                                    backgroundColor: 'rgba(0,150,255,0.3)',
-                                    border: '1px solid rgba(0,150,255,0.5)',
+                                    backgroundColor: districtPickerActive ? 'rgba(255,165,0,0.5)' : 'rgba(0,150,255,0.3)',
+                                    border: `1px solid ${districtPickerActive ? 'rgba(255,165,0,0.8)' : 'rgba(0,150,255,0.5)'}`,
                                     borderRadius: '2rem',
                                     color: 'white',
-                                    cursor: 'pointer',
-                                    fontSize: '10rem'
+                                    cursor: anyPickerActive ? 'not-allowed' : 'pointer',
+                                    fontSize: '10rem',
+                                    fontWeight: districtPickerActive ? 'bold' : 'normal',
+                                    opacity: anyPickerActive ? 0.6 : 1
                                 }}
-                                disabled={buildingPickerActive}
+                                title={districtPickerActive ? 'Picking mode active - click on districts in the game' : 'Click to start picking districts'}
                             >
-                                + District
+                                {districtPickerActive ? '🎯 Picking...' : '+ District'}
                             </button>
                         </div>
                     </div>
@@ -507,10 +531,24 @@ const ManageResourceChainsPanel: React.FC<{
 }> = ({ entityId, onClose, configBinding$ = resourceChainConfig$, isDistrict = false }) => {
     const configJson = useValue(configBinding$) as string;
     const buildingPickerActive = useValue(buildingPickerActive$);
+    const districtPickerActive = useValue(districtPickerActive$);
+    const anyPickerActive = buildingPickerActive || districtPickerActive;
     const [config, setConfig] = useState<BuildingConfiguration | null>(null);
     const [isLoading, setIsLoading] = useState<boolean>(true);
 
-
+    // Handle Escape key to cancel district picker
+    useEffect(() => {
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if (e.key === 'Escape' && districtPickerActive) {
+                trigger("manageResourceChains", "cancelDistrictPicker");
+                e.preventDefault();
+                e.stopPropagation();
+            }
+        };
+        
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [districtPickerActive]);
 
     useEffect(() => {
         // Request config when entity changes
@@ -680,19 +718,22 @@ const ManageResourceChainsPanel: React.FC<{
                     right: '20rem',
                     width: '450rem',
                     maxHeight: 'calc(100vh - 100rem)',
-                    opacity: buildingPickerActive ? 0.7 : 1,
-                    backgroundColor: buildingPickerActive ? 'rgba(0,0,0,0.6)' : undefined
+                    opacity: anyPickerActive ? 0.7 : 1,
+                    backgroundColor: anyPickerActive ? 'rgba(0,0,0,0.6)' : undefined
                 }}
                 onClick={(e) => {
                     // Handle clicks on the panel to finish picking mode
                     if (buildingPickerActive) {
                         trigger("manageResourceChains", "confirmBuildingPicker");
                         e.stopPropagation(); // Prevent event from bubbling
+                    } else if (districtPickerActive) {
+                        trigger("manageResourceChains", "confirmDistrictPicker");
+                        e.stopPropagation(); // Prevent event from bubbling
                     }
                 }}
             >
-                {/* Overlay message when picking buildings - inside Panel but above content */}
-                {buildingPickerActive && (
+                {/* Overlay message when picking - inside Panel but above content */}
+                {anyPickerActive && (
                     <div style={{
                         position: 'absolute',
                         top: '0',
@@ -710,12 +751,13 @@ const ManageResourceChainsPanel: React.FC<{
                         pointerEvents: 'none',
                         cursor: 'pointer'
                     }}>
-                        Click anywhere on the panel to finish
+                        {buildingPickerActive && 'Click anywhere on the panel to finish picking buildings'}
+                        {districtPickerActive && 'Click anywhere on the panel to finish picking districts'}
                     </div>
                 )}
                 
                 <div style={{ 
-                    paddingTop: buildingPickerActive ? '60rem' : '0', // Add padding when overlay is visible
+                    paddingTop: anyPickerActive ? '60rem' : '0', // Add padding when overlay is visible
                     transition: 'padding-top 0.2s ease'
                 }}>
                     <Scrollable>

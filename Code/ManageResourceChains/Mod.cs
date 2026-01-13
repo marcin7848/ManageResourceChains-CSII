@@ -62,6 +62,11 @@ namespace ManageResourceChains
                 log.Info("Registering BuildingPickerToolSystem...");
                 updateSystem.UpdateAt<BuildingPickerToolSystem>(SystemUpdatePhase.ToolUpdate);
                 log.Info("BuildingPickerToolSystem registered!");
+                
+                // Register district picker tool
+                log.Info("Registering DistrictPickerToolSystem...");
+                updateSystem.UpdateAt<DistrictPickerToolSystem>(SystemUpdatePhase.ToolUpdate);
+                log.Info("DistrictPickerToolSystem registered!");
             }
             catch (System.Exception ex)
             {

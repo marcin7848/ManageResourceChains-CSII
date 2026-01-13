@@ -26,15 +26,19 @@ namespace ManageResourceChains.Systems
         private ValueBinding<string> _resourceChainConfigBinding;
         private ValueBinding<string> _districtConfigBinding;
         private ValueBinding<bool> _buildingPickerActiveBinding;
+        private ValueBinding<bool> _districtPickerActiveBinding;
+        private ValueBinding<string> _allDistrictsBinding;
         
         // Tool systems
         private BuildingPickerToolSystem _buildingPickerToolSystem;
+        private DistrictPickerToolSystem _districtPickerToolSystem;
         private ToolSystem _toolSystem;
         
-        // State for tracking building picker
+        // State for tracking picker
         private string _currentRuleId;
         private int _currentEntityId;
         private Data.EntityType _currentEntityType;
+        private bool _isPickingDistricts; // Track if we're in district picking mode (don't activate tool, just flag)
         
         protected override void OnCreate()
         {
@@ -43,12 +47,14 @@ namespace ManageResourceChains.Systems
             
             // Get tool systems
             _buildingPickerToolSystem = World.GetOrCreateSystemManaged<BuildingPickerToolSystem>();
+            _districtPickerToolSystem = World.GetOrCreateSystemManaged<DistrictPickerToolSystem>();
             _toolSystem = World.GetOrCreateSystemManaged<ToolSystem>();
             
             // Add binding to send configuration data to UI
             AddBinding(_resourceChainConfigBinding = new ValueBinding<string>("manageResourceChains", "resourceChainConfig", "{}"));
             AddBinding(_districtConfigBinding = new ValueBinding<string>("manageResourceChains", "districtConfig", "{}"));
             AddBinding(_buildingPickerActiveBinding = new ValueBinding<bool>("manageResourceChains", "buildingPickerActive", false));
+            AddBinding(_districtPickerActiveBinding = new ValueBinding<bool>("manageResourceChains", "districtPickerActive", false));
             
             // Add method bindings for UI to call
             AddBinding(new TriggerBinding<int>("manageResourceChains", "requestBuildingConfig", RequestBuildingConfig));
@@ -64,6 +70,16 @@ namespace ManageResourceChains.Systems
             AddBinding(new TriggerBinding<int, string, bool>("manageResourceChains", "startBuildingPicker", StartBuildingPicker));
             AddBinding(new TriggerBinding("manageResourceChains", "confirmBuildingPicker", ConfirmBuildingPicker));
             AddBinding(new TriggerBinding("manageResourceChains", "cancelBuildingPicker", CancelBuildingPicker));
+            
+            // District picker tool bindings
+            AddBinding(new TriggerBinding<int, string, bool>("manageResourceChains", "startDistrictPicker", StartDistrictPicker));
+            AddBinding(new TriggerBinding("manageResourceChains", "confirmDistrictPicker", ConfirmDistrictPicker));
+            AddBinding(new TriggerBinding("manageResourceChains", "cancelDistrictPicker", CancelDistrictPicker));
+            
+            // Direct district management (no picker needed)
+            AddBinding(new TriggerBinding<int, string, int>("manageResourceChains", "addDistrictToRule", AddDistrictToRule));
+            AddBinding(new TriggerBinding("manageResourceChains", "requestAllDistricts", RequestAllDistricts));
+            AddBinding(_allDistrictsBinding = new ValueBinding<string>("manageResourceChains", "allDistricts", "[]"));
             
             // Load configurations from file
             LoadConfigurations();
@@ -544,6 +560,135 @@ namespace ManageResourceChains.Systems
 
         #endregion
 
+        #region District Picker Tool
+
+        /// <summary>
+        /// Check if district picker is currently active
+        /// </summary>
+        public bool IsDistrictPickerActive()
+        {
+            return _isPickingDistricts;
+        }
+
+        /// <summary>
+        /// Start district picker - Activate the tool to block context switching
+        /// </summary>
+        private void StartDistrictPicker(int entityId, string ruleId, bool isDistrict)
+        {
+            try
+            {
+                _currentEntityType = isDistrict ? Data.EntityType.District : Data.EntityType.Building;
+                string entityTypeName = isDistrict ? "district" : "building";
+                Mod.log.Info($"Starting district picker for {entityTypeName} {entityId}, rule {ruleId}");
+                
+                _currentEntityId = entityId;
+                _currentRuleId = ruleId;
+                _isPickingDistricts = true;
+                
+                // Activate the tool - this blocks DefaultToolSystem and prevents context switching
+                _toolSystem.activeTool = _districtPickerToolSystem;
+                _districtPickerActiveBinding.Update(true);
+                
+                Mod.log.Info("District picker tool activated (blocks DefaultToolSystem)");
+            }
+            catch (Exception ex)
+            {
+                Mod.log.Error($"Error starting district picker: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Called when a district is selected during picking mode - updates UI immediately
+        /// </summary>
+        public void OnDistrictSelected(Entity districtEntity)
+        {
+            try
+            {
+                int districtId = districtEntity.Index;
+                string entityTypeName = _currentEntityType == Data.EntityType.Building ? "building" : "district";
+                Mod.log.Info($"District {districtId} selected for {entityTypeName} {_currentEntityId}, updating staging");
+                
+                string key = GetConfigKey(_currentEntityId, _currentEntityType);
+                var configBinding = _currentEntityType == Data.EntityType.Building ? _resourceChainConfigBinding : _districtConfigBinding;
+                
+                // Ensure config exists for this entity in staging
+                if (!_stagingConfigurations.TryGetValue(key, out var config))
+                {
+                    Mod.log.Warn($"Staging config not found for {entityTypeName} {_currentEntityId}, this should not happen");
+                    return;
+                }
+                
+                // Find the rule
+                var rule = config.Rules.FirstOrDefault(r => r.Id == _currentRuleId);
+                if (rule == null)
+                {
+                    Mod.log.Warn($"Rule {_currentRuleId} not found in staging config for {entityTypeName} {_currentEntityId}");
+                    return;
+                }
+                
+                // Add district to the rule if not already present
+                if (!rule.Districts.Contains(districtId))
+                {
+                    rule.Districts.Add(districtId);
+                    Mod.log.Info($"✓ Added district {districtId} to {entityTypeName} rule {_currentRuleId} in staging");
+                    
+                    // Send updated config to UI immediately
+                    string json = JsonConvert.SerializeObject(config, Formatting.Indented);
+                    configBinding.Update(json);
+                    
+                    Mod.log.Info($"UI updated with new district for {entityTypeName} (staging only, not applied to game logic)");
+                }
+            }
+            catch (Exception ex)
+            {
+                Mod.log.Error($"Error in OnDistrictSelected: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Confirm district picker selection
+        /// </summary>
+        public void ConfirmDistrictPicker()
+        {
+            try
+            {
+                Mod.log.Info("Confirming district picker selection");
+                
+                _districtPickerToolSystem.ConfirmSelection();
+                _isPickingDistricts = false;
+                _districtPickerActiveBinding.Update(false);
+                
+                Mod.log.Info("District picker confirmed (changes in staging, user must click 'Save All Changes')");
+            }
+            catch (Exception ex)
+            {
+                Mod.log.Error($"Error confirming district picker: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Cancel district picker selection
+        /// </summary>
+        public void CancelDistrictPicker()
+        {
+            try
+            {
+                Mod.log.Info("Cancelling district picker");
+                
+                _districtPickerToolSystem.CancelSelection();
+                _isPickingDistricts = false;
+                _districtPickerActiveBinding.Update(false);
+                
+                Mod.log.Info("District picker cancelled");
+            }
+            catch (Exception ex)
+            {
+                Mod.log.Error($"Error cancelling district picker: {ex.Message}");
+            }
+        }
+
+        #endregion
+
         #region Public API for Game Systems
 
         /// <summary>
@@ -585,6 +730,97 @@ namespace ManageResourceChains.Systems
                 Type = Data.EntityType.Building,
                 Rules = new List<Data.ResourceChainRule>()
             };
+        }
+
+        #endregion
+
+        #region Direct District Management
+
+        /// <summary>
+        /// Request all districts in the game to populate a dropdown list
+        /// </summary>
+        private void RequestAllDistricts()
+        {
+            try
+            {
+                Mod.log.Info("Requesting all districts");
+                
+                // Query all districts
+                var districtQuery = SystemAPI.QueryBuilder()
+                    .WithAll<Game.Areas.District>()
+                    .WithNone<Game.Common.Deleted, Game.Tools.Temp>()
+                    .Build();
+                
+                var districts = districtQuery.ToEntityArray(Unity.Collections.Allocator.Temp);
+                
+                // Create a list of district info
+                var districtList = new List<object>();
+                foreach (var district in districts)
+                {
+                    districtList.Add(new { id = district.Index, name = $"District {district.Index}" });
+                }
+                
+                districts.Dispose();
+                
+                // Serialize and send to UI
+                string json = JsonConvert.SerializeObject(districtList);
+                _allDistrictsBinding.Update(json);
+                
+                Mod.log.Info($"Sent {districtList.Count} districts to UI");
+            }
+            catch (Exception ex)
+            {
+                Mod.log.Error($"Error requesting all districts: {ex.Message}");
+                _allDistrictsBinding.Update("[]");
+            }
+        }
+
+        /// <summary>
+        /// Add a district to a rule directly by ID (no picker needed)
+        /// </summary>
+        private void AddDistrictToRule(int entityId, string ruleId, int districtId)
+        {
+            try
+            {
+                Mod.log.Info($"Adding district {districtId} to rule {ruleId} for entity {entityId}");
+                
+                // For now, assume building entity type - UI should pass this
+                string key = GetConfigKey(entityId, Data.EntityType.Building);
+                
+                // Ensure config exists in staging
+                if (!_stagingConfigurations.TryGetValue(key, out var config))
+                {
+                    Mod.log.Warn($"No staging config found for entity {entityId}");
+                    return;
+                }
+                
+                // Find the rule
+                var rule = config.Rules.FirstOrDefault(r => r.Id == ruleId);
+                if (rule == null)
+                {
+                    Mod.log.Warn($"Rule {ruleId} not found in config for entity {entityId}");
+                    return;
+                }
+                
+                // Add district if not already present
+                if (!rule.Districts.Contains(districtId))
+                {
+                    rule.Districts.Add(districtId);
+                    Mod.log.Info($"✓ Added district {districtId} to rule {ruleId}");
+                    
+                    // Update UI
+                    string json = JsonConvert.SerializeObject(config, Formatting.Indented);
+                    _resourceChainConfigBinding.Update(json);
+                }
+                else
+                {
+                    Mod.log.Info($"District {districtId} already in rule {ruleId}");
+                }
+            }
+            catch (Exception ex)
+            {
+                Mod.log.Error($"Error adding district to rule: {ex.Message}");
+            }
         }
 
         #endregion

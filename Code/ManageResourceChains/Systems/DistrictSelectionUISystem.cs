@@ -1,6 +1,7 @@
 ﻿using Colossal.Logging;
 using Colossal.UI.Binding;
 using Game.Areas;
+using Game.Tools;
 using Game.UI;
 using Game.UI.InGame;
 using Unity.Entities;
@@ -16,6 +17,8 @@ namespace ManageResourceChains.Systems
         private ILog m_Log;
         private Entity m_SelectedDistrict;
         private SelectedInfoUISystem m_SelectedInfoUISystem;
+        private ResourceChainManagementSystem m_ResourceChainManagementSystem;
+        private ToolSystem m_ToolSystem;
         
         private ValueBinding<bool> m_IsDistrictSelectedBinding;
         private ValueBinding<int> m_SelectedDistrictEntityBinding;
@@ -29,6 +32,8 @@ namespace ManageResourceChains.Systems
             m_SelectedDistrict = Entity.Null;
             
             m_SelectedInfoUISystem = World.GetOrCreateSystemManaged<SelectedInfoUISystem>();
+            m_ResourceChainManagementSystem = World.GetOrCreateSystemManaged<ResourceChainManagementSystem>();
+            m_ToolSystem = World.GetOrCreateSystemManaged<ToolSystem>();
             
             // Create UI bindings for district selection
             AddBinding(m_IsDistrictSelectedBinding = new ValueBinding<bool>("manageResourceChains", "isDistrictSelected", false));
@@ -44,6 +49,7 @@ namespace ManageResourceChains.Systems
             Entity selectedEntity = m_SelectedInfoUISystem.selectedEntity;
             bool hasDistrict = selectedEntity != Entity.Null && EntityManager.HasComponent<District>(selectedEntity);
             
+            // Normal district selection logic
             m_IsDistrictSelectedBinding.Update(hasDistrict);
             
             if (hasDistrict)
