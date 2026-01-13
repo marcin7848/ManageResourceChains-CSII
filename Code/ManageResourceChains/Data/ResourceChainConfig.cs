@@ -88,6 +88,15 @@ namespace ManageResourceChains.Data
     }
 
     /// <summary>
+    /// Type of entity that the configuration applies to
+    /// </summary>
+    public enum EntityType
+    {
+        Building,
+        District
+    }
+
+    /// <summary>
     /// Component data that will be attached to building entities to store their resource chain configuration
     /// </summary>
     public struct ResourceChainData : IComponentData, ISerializable
@@ -108,11 +117,12 @@ namespace ManageResourceChains.Data
     }
 
     /// <summary>
-    /// Storage for all building configurations
+    /// Storage for entity configurations (buildings or districts)
     /// </summary>
     public class BuildingConfiguration
     {
         public int BuildingEntityId { get; set; }
+        public EntityType Type { get; set; } = EntityType.Building;
         public List<ResourceChainRule> Rules { get; set; } = new List<ResourceChainRule>();
     }
 }
