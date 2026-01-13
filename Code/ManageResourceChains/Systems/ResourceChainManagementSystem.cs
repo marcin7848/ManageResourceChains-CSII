@@ -17,9 +17,13 @@ namespace ManageResourceChains.Systems
     {
         // Storage for all building configurations (in-memory)
         private static Dictionary<int, Data.BuildingConfiguration> _buildingConfigurations = new Dictionary<int, Data.BuildingConfiguration>();
-        
+
         // Storage for all district configurations (in-memory)
         private static Dictionary<int, Data.BuildingConfiguration> _districtConfigurations = new Dictionary<int, Data.BuildingConfiguration>();
+        
+        // Staging configurations for UI editing (not used by game logic until committed)
+        private Dictionary<int, Data.BuildingConfiguration> _stagingBuildingConfigurations = new Dictionary<int, Data.BuildingConfiguration>();
+        private Dictionary<int, Data.BuildingConfiguration> _stagingDistrictConfigurations = new Dictionary<int, Data.BuildingConfiguration>();
         
         // Bindings
         private ValueBinding<string> _resourceChainConfigBinding;
@@ -54,6 +58,7 @@ namespace ManageResourceChains.Systems
             AddBinding(new TriggerBinding<int>("manageResourceChains", "requestDistrictConfig", RequestDistrictConfig));
             AddBinding(new TriggerBinding<int, string>("manageResourceChains", "saveBuildingConfig", SaveBuildingConfig));
             AddBinding(new TriggerBinding<int, string>("manageResourceChains", "saveDistrictConfig", SaveDistrictConfig));
+            AddBinding(new TriggerBinding("manageResourceChains", "saveAllConfigurations", SaveAllConfigurationsToDisk));
             AddBinding(new TriggerBinding<int, string>("manageResourceChains", "addResourceChainRule", AddResourceChainRule));
             AddBinding(new TriggerBinding<int, string>("manageResourceChains", "removeResourceChainRule", RemoveResourceChainRule));
             AddBinding(new TriggerBinding<int, string, string>("manageResourceChains", "updateResourceChainRule", UpdateResourceChainRule));
@@ -81,16 +86,27 @@ namespace ManageResourceChains.Systems
             {
                 Mod.log.Info($"Requesting config for building {buildingEntityId}");
                 
-                if (!_buildingConfigurations.ContainsKey(buildingEntityId))
+                // Initialize staging config from active config if not already present
+                if (!_stagingBuildingConfigurations.ContainsKey(buildingEntityId))
                 {
-                    _buildingConfigurations[buildingEntityId] = new Data.BuildingConfiguration
+                    if (_buildingConfigurations.ContainsKey(buildingEntityId))
                     {
-                        BuildingEntityId = buildingEntityId,
-                        Rules = new List<Data.ResourceChainRule>()
-                    };
+                        // Deep copy from active config
+                        var activeConfig = _buildingConfigurations[buildingEntityId];
+                        _stagingBuildingConfigurations[buildingEntityId] = DeepCopyConfiguration(activeConfig);
+                    }
+                    else
+                    {
+                        // Create new empty config
+                        _stagingBuildingConfigurations[buildingEntityId] = new Data.BuildingConfiguration
+                        {
+                            BuildingEntityId = buildingEntityId,
+                            Rules = new List<Data.ResourceChainRule>()
+                        };
+                    }
                 }
                 
-                var config = _buildingConfigurations[buildingEntityId];
+                var config = _stagingBuildingConfigurations[buildingEntityId];
                 string json = JsonConvert.SerializeObject(config, Formatting.Indented);
                 
                 Mod.log.Info($"Sending config: {json}");
@@ -104,19 +120,19 @@ namespace ManageResourceChains.Systems
         }
 
         /// <summary>
-        /// Save configuration for a building
+        /// Save configuration for a building (to staging only, not applied to game logic)
         /// </summary>
         private void SaveBuildingConfig(int buildingEntityId, string configJson)
         {
             try
             {
-                Mod.log.Info($"Saving config for building {buildingEntityId}: {configJson}");
+                Mod.log.Info($"Saving config for building {buildingEntityId} to staging: {configJson}");
                 
                 var config = JsonConvert.DeserializeObject<Data.BuildingConfiguration>(configJson);
                 if (config != null)
                 {
-                    _buildingConfigurations[buildingEntityId] = config;
-                    SaveConfigurations();
+                    _stagingBuildingConfigurations[buildingEntityId] = config;
+                    // Note: Not applied to game logic or saved to disk - only when SaveAllConfigurations is called
                 }
             }
             catch (Exception ex)
@@ -134,16 +150,27 @@ namespace ManageResourceChains.Systems
             {
                 Mod.log.Info($"Requesting config for district {districtEntityId}");
                 
-                if (!_districtConfigurations.ContainsKey(districtEntityId))
+                // Initialize staging config from active config if not already present
+                if (!_stagingDistrictConfigurations.ContainsKey(districtEntityId))
                 {
-                    _districtConfigurations[districtEntityId] = new Data.BuildingConfiguration
+                    if (_districtConfigurations.ContainsKey(districtEntityId))
                     {
-                        BuildingEntityId = districtEntityId,
-                        Rules = new List<Data.ResourceChainRule>()
-                    };
+                        // Deep copy from active config
+                        var activeConfig = _districtConfigurations[districtEntityId];
+                        _stagingDistrictConfigurations[districtEntityId] = DeepCopyConfiguration(activeConfig);
+                    }
+                    else
+                    {
+                        // Create new empty config
+                        _stagingDistrictConfigurations[districtEntityId] = new Data.BuildingConfiguration
+                        {
+                            BuildingEntityId = districtEntityId,
+                            Rules = new List<Data.ResourceChainRule>()
+                        };
+                    }
                 }
                 
-                var config = _districtConfigurations[districtEntityId];
+                var config = _stagingDistrictConfigurations[districtEntityId];
                 string json = JsonConvert.SerializeObject(config, Formatting.Indented);
                 
                 Mod.log.Info($"Sending district config: {json}");
@@ -157,19 +184,19 @@ namespace ManageResourceChains.Systems
         }
 
         /// <summary>
-        /// Save configuration for a district
+        /// Save configuration for a district (to staging only, not applied to game logic)
         /// </summary>
         private void SaveDistrictConfig(int districtEntityId, string configJson)
         {
             try
             {
-                Mod.log.Info($"Saving config for district {districtEntityId}: {configJson}");
+                Mod.log.Info($"Saving config for district {districtEntityId} to staging: {configJson}");
                 
                 var config = JsonConvert.DeserializeObject<Data.BuildingConfiguration>(configJson);
                 if (config != null)
                 {
-                    _districtConfigurations[districtEntityId] = config;
-                    SaveConfigurations();
+                    _stagingDistrictConfigurations[districtEntityId] = config;
+                    // Note: Not applied to game logic or saved to disk - only when SaveAllConfigurations is called
                 }
             }
             catch (Exception ex)
@@ -179,17 +206,17 @@ namespace ManageResourceChains.Systems
         }
 
         /// <summary>
-        /// Add a new resource chain rule
+        /// Add a new resource chain rule (to staging only)
         /// </summary>
         private void AddResourceChainRule(int buildingEntityId, string ruleJson)
         {
             try
             {
-                Mod.log.Info($"Adding rule for building {buildingEntityId}");
+                Mod.log.Info($"Adding rule for building {buildingEntityId} to staging");
                 
-                if (!_buildingConfigurations.ContainsKey(buildingEntityId))
+                if (!_stagingBuildingConfigurations.ContainsKey(buildingEntityId))
                 {
-                    _buildingConfigurations[buildingEntityId] = new Data.BuildingConfiguration
+                    _stagingBuildingConfigurations[buildingEntityId] = new Data.BuildingConfiguration
                     {
                         BuildingEntityId = buildingEntityId,
                         Rules = new List<Data.ResourceChainRule>()
@@ -197,9 +224,9 @@ namespace ManageResourceChains.Systems
                 }
                 
                 var rule = JsonConvert.DeserializeObject<Data.ResourceChainRule>(ruleJson) ?? new Data.ResourceChainRule();
-                _buildingConfigurations[buildingEntityId].Rules.Add(rule);
+                _stagingBuildingConfigurations[buildingEntityId].Rules.Add(rule);
                 
-                SaveConfigurations();
+                // Note: Not applied to game logic or saved to disk - only when SaveAllConfigurations is called
                 RequestBuildingConfig(buildingEntityId);
             }
             catch (Exception ex)
@@ -209,20 +236,20 @@ namespace ManageResourceChains.Systems
         }
 
         /// <summary>
-        /// Remove a resource chain rule
+        /// Remove a resource chain rule (from staging only)
         /// </summary>
         private void RemoveResourceChainRule(int buildingEntityId, string ruleId)
         {
             try
             {
-                Mod.log.Info($"Removing rule {ruleId} for building {buildingEntityId}");
+                Mod.log.Info($"Removing rule {ruleId} for building {buildingEntityId} from staging");
                 
-                if (_buildingConfigurations.ContainsKey(buildingEntityId))
+                if (_stagingBuildingConfigurations.ContainsKey(buildingEntityId))
                 {
-                    var config = _buildingConfigurations[buildingEntityId];
+                    var config = _stagingBuildingConfigurations[buildingEntityId];
                     config.Rules.RemoveAll(r => r.Id == ruleId);
                     
-                    SaveConfigurations();
+                    // Note: Not applied to game logic or saved to disk - only when SaveAllConfigurations is called
                     RequestBuildingConfig(buildingEntityId);
                 }
             }
@@ -233,17 +260,17 @@ namespace ManageResourceChains.Systems
         }
 
         /// <summary>
-        /// Update an existing resource chain rule
+        /// Update an existing resource chain rule (in staging only)
         /// </summary>
         private void UpdateResourceChainRule(int buildingEntityId, string ruleId, string ruleJson)
         {
             try
             {
-                Mod.log.Info($"Updating rule {ruleId} for building {buildingEntityId}");
+                Mod.log.Info($"Updating rule {ruleId} for building {buildingEntityId} in staging");
                 
-                if (_buildingConfigurations.ContainsKey(buildingEntityId))
+                if (_stagingBuildingConfigurations.ContainsKey(buildingEntityId))
                 {
-                    var config = _buildingConfigurations[buildingEntityId];
+                    var config = _stagingBuildingConfigurations[buildingEntityId];
                     var existingRuleIndex = config.Rules.FindIndex(r => r.Id == ruleId);
                     
                     if (existingRuleIndex >= 0)
@@ -252,7 +279,7 @@ namespace ManageResourceChains.Systems
                         if (updatedRule != null)
                         {
                             config.Rules[existingRuleIndex] = updatedRule;
-                            SaveConfigurations();
+                            // Note: Not applied to game logic or saved to disk - only when SaveAllConfigurations is called
                             RequestBuildingConfig(buildingEntityId);
                         }
                     }
@@ -316,6 +343,20 @@ namespace ManageResourceChains.Systems
         }
 
         /// <summary>
+        /// Create a deep copy of a configuration
+        /// </summary>
+        private Data.BuildingConfiguration DeepCopyConfiguration(Data.BuildingConfiguration original)
+        {
+            // Use JSON serialization for deep copy
+            string json = JsonConvert.SerializeObject(original);
+            return JsonConvert.DeserializeObject<Data.BuildingConfiguration>(json) ?? new Data.BuildingConfiguration
+            {
+                BuildingEntityId = original.BuildingEntityId,
+                Rules = new List<Data.ResourceChainRule>()
+            };
+        }
+
+        /// <summary>
         /// Get all building configurations (for use by other systems like pathfinding)
         /// </summary>
         public Dictionary<int, Data.BuildingConfiguration> GetAllConfigurations()
@@ -329,6 +370,40 @@ namespace ManageResourceChains.Systems
         public Dictionary<int, Data.BuildingConfiguration> GetAllDistrictConfigurations()
         {
             return _districtConfigurations;
+        }
+
+        /// <summary>
+        /// Save all configurations to disk (called from UI when "Save all changes" is clicked)
+        /// This commits staging changes to active configurations and saves to disk
+        /// </summary>
+        private void SaveAllConfigurationsToDisk()
+        {
+            try
+            {
+                Mod.log.Info("Committing staging changes to active configurations and saving to disk...");
+                
+                // Commit all staging changes to active configurations
+                foreach (var kvp in _stagingBuildingConfigurations)
+                {
+                    _buildingConfigurations[kvp.Key] = DeepCopyConfiguration(kvp.Value);
+                    Mod.log.Info($"Committed building config for entity {kvp.Key}");
+                }
+                
+                foreach (var kvp in _stagingDistrictConfigurations)
+                {
+                    _districtConfigurations[kvp.Key] = DeepCopyConfiguration(kvp.Value);
+                    Mod.log.Info($"Committed district config for entity {kvp.Key}");
+                }
+                
+                // Now save to disk
+                SaveConfigurations();
+                
+                Mod.log.Info("All configurations committed and saved successfully - game logic will now use updated rules");
+            }
+            catch (Exception ex)
+            {
+                Mod.log.Error($"Error saving all configurations: {ex.Message}");
+            }
         }
 
         /// <summary>
@@ -372,8 +447,8 @@ namespace ManageResourceChains.Systems
         private string GetBuildingConfigFilePath()
         {
             string userDataPath = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-            string modPath = Path.Combine(userDataPath, "Colossal Order", "Cities Skylines II", "ModsData", "Mod");
-            return Path.Combine(modPath, "configs.json");
+            string modPath = Path.Combine(userDataPath, "Colossal Order", "Cities Skylines II", "ModsData", "ManageResourceChains");
+            return Path.Combine(modPath, "resource_chain_configs.json");
         }
 
         /// <summary>
@@ -421,16 +496,16 @@ namespace ManageResourceChains.Systems
             {
                 int buildingId = buildingEntity.Index;
                 string entityType = _isDistrictMode ? "district" : "building";
-                Mod.log.Info($"Building {buildingId} selected for {entityType} {_currentBuildingEntityId}, updating UI");
+                Mod.log.Info($"Building {buildingId} selected for {entityType} {_currentBuildingEntityId}, updating staging");
                 
-                // Get the correct configuration dictionary based on mode
-                var configDictionary = _isDistrictMode ? _districtConfigurations : _buildingConfigurations;
+                // Get the correct staging configuration dictionary based on mode
+                var stagingConfigDictionary = _isDistrictMode ? _stagingDistrictConfigurations : _stagingBuildingConfigurations;
                 var configBinding = _isDistrictMode ? _districtConfigBinding : _resourceChainConfigBinding;
                 
-                // Ensure config exists for this entity
-                if (!configDictionary.TryGetValue(_currentBuildingEntityId, out var config))
+                // Ensure config exists for this entity in staging
+                if (!stagingConfigDictionary.TryGetValue(_currentBuildingEntityId, out var config))
                 {
-                    Mod.log.Warn($"Config not found for {entityType} {_currentBuildingEntityId}, this should not happen");
+                    Mod.log.Warn($"Staging config not found for {entityType} {_currentBuildingEntityId}, this should not happen");
                     return;
                 }
                 
@@ -438,7 +513,7 @@ namespace ManageResourceChains.Systems
                 var rule = config.Rules.FirstOrDefault(r => r.Id == _currentRuleId);
                 if (rule == null)
                 {
-                    Mod.log.Warn($"Rule {_currentRuleId} not found in config for {entityType} {_currentBuildingEntityId}");
+                    Mod.log.Warn($"Rule {_currentRuleId} not found in staging config for {entityType} {_currentBuildingEntityId}");
                     // Don't create a new rule with defaults - this would reset user's choices
                     return;
                 }
@@ -447,13 +522,13 @@ namespace ManageResourceChains.Systems
                 if (!rule.Buildings.Contains(buildingId))
                 {
                     rule.Buildings.Add(buildingId);
-                    Mod.log.Info($"✓ Added building {buildingId} to {entityType} rule {_currentRuleId}");
+                    Mod.log.Info($"✓ Added building {buildingId} to {entityType} rule {_currentRuleId} in staging");
                     
                     // Send updated config to UI immediately
                     string json = JsonConvert.SerializeObject(config, Formatting.Indented);
                     configBinding.Update(json);
                     
-                    Mod.log.Info($"UI updated with new building for {entityType}");
+                    Mod.log.Info($"UI updated with new building for {entityType} (staging only, not applied to game logic)");
                 }
             }
             catch (Exception ex)

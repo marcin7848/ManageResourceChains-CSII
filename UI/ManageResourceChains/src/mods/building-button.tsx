@@ -639,14 +639,20 @@ const ManageResourceChainsPanel: React.FC<{
         if (!config) return;
         
         try {
+            // First, save current config to memory (not disk)
             const json = JSON.stringify(config);
             const saveType = isDistrict ? "saveDistrictConfig" : "saveBuildingConfig";
             trigger("manageResourceChains", saveType, entityId, json);
             
-            // Close the panel after saving
+            // Then trigger disk save for all configurations
             setTimeout(() => {
-                onClose();
-            }, 100); // Small delay to ensure save is triggered
+                trigger("manageResourceChains", "saveAllConfigurations");
+                
+                // Close the panel after saving
+                setTimeout(() => {
+                    onClose();
+                }, 100); // Small delay to ensure save is triggered
+            }, 50); // Small delay to ensure config is updated in memory first
         } catch (error) {
             console.error("Error saving config:", error);
         }
