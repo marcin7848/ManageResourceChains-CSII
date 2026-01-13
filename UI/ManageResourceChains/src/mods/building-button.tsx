@@ -68,25 +68,26 @@ function colorToHex(color: Color): string {
 const ResourceChainRuleComponent: React.FC<{
     rule: ResourceChainRule;
     entityId: number;
+    fullConfig: BuildingConfiguration; // Add full config
     onUpdate: (rule: ResourceChainRule) => void;
     onDelete: () => void;
     isDistrict?: boolean;  // Optional: true if this is for a district
-}> = ({ rule, entityId, onUpdate, onDelete, isDistrict = false }) => {
+}> = ({ rule, entityId, fullConfig, onUpdate, onDelete, isDistrict = false }) => {
     const buildingPickerActive = useValue(buildingPickerActive$);
-    const [isPickingBuildings, setIsPickingBuildings] = useState(false);
-    
-    // Sync local state with global binding
-    useEffect(() => {
-        if (!buildingPickerActive && isPickingBuildings) {
-            setIsPickingBuildings(false);
-        }
-    }, [buildingPickerActive, isPickingBuildings]);
     
     const startBuildingPicker = () => {
         // Only start picking if not already picking
-        if (!isPickingBuildings) {
-            setIsPickingBuildings(true);
-            trigger("manageResourceChains", "startBuildingPicker", entityId, rule.id, isDistrict);
+        if (!buildingPickerActive) {
+            // Save current config to C# memory (not to disk) so the rule exists there
+            // This is required for OnBuildingSelected to work
+            const json = JSON.stringify(fullConfig);
+            const saveType = isDistrict ? "saveDistrictConfig" : "saveBuildingConfig";
+            trigger("manageResourceChains", saveType, entityId, json);
+            
+            // Small delay to ensure config is updated before starting picker
+            setTimeout(() => {
+                trigger("manageResourceChains", "startBuildingPicker", entityId, rule.id, isDistrict);
+            }, 50);
         }
     };
     
@@ -281,21 +282,21 @@ const ResourceChainRuleComponent: React.FC<{
                         <div style={{ display: 'flex', gap: '8rem' }}>
                             <button
                                 onClick={startBuildingPicker}
-                                disabled={isPickingBuildings}
+                                disabled={buildingPickerActive}
                                 style={{
                                     padding: '2rem 6rem',
-                                    backgroundColor: isPickingBuildings ? 'rgba(255,165,0,0.5)' : 'rgba(0,150,255,0.3)',
-                                    border: `1px solid ${isPickingBuildings ? 'rgba(255,165,0,0.8)' : 'rgba(0,150,255,0.5)'}`,
+                                    backgroundColor: buildingPickerActive ? 'rgba(255,165,0,0.5)' : 'rgba(0,150,255,0.3)',
+                                    border: `1px solid ${buildingPickerActive ? 'rgba(255,165,0,0.8)' : 'rgba(0,150,255,0.5)'}`,
                                     borderRadius: '2rem',
                                     color: 'white',
-                                    cursor: isPickingBuildings ? 'not-allowed' : 'pointer',
+                                    cursor: buildingPickerActive ? 'not-allowed' : 'pointer',
                                     fontSize: '10rem',
-                                    fontWeight: isPickingBuildings ? 'bold' : 'normal',
-                                    opacity: isPickingBuildings ? 0.6 : 1
+                                    fontWeight: buildingPickerActive ? 'bold' : 'normal',
+                                    opacity: buildingPickerActive ? 0.6 : 1
                                 }}
-                                title={isPickingBuildings ? 'Picking mode active - click on buildings in the game' : 'Click to start picking buildings'}
+                                title={buildingPickerActive ? 'Picking mode active - click on buildings in the game' : 'Click to start picking buildings'}
                             >
-                                {isPickingBuildings ? '🎯 Picking...' : '+ Building'}
+                                {buildingPickerActive ? '🎯 Picking...' : '+ Building'}
                             </button>
                             <button
                                 style={{
@@ -307,7 +308,7 @@ const ResourceChainRuleComponent: React.FC<{
                                     cursor: 'pointer',
                                     fontSize: '10rem'
                                 }}
-                                disabled={isPickingBuildings}
+                                disabled={buildingPickerActive}
                             >
                                 + District
                             </button>
@@ -780,6 +781,7 @@ const ManageResourceChainsPanel: React.FC<{
                                                     key={`${rule.id}-${index}`}
                                                     rule={rule}
                                                     entityId={entityId}
+                                                    fullConfig={config}
                                                     onUpdate={(updatedRule) => updateRule(rule.id, updatedRule)}
                                                     onDelete={() => deleteRule(rule.id)}
                                                     isDistrict={isDistrict}

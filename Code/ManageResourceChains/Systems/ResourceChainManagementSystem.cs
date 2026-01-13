@@ -371,10 +371,9 @@ namespace ManageResourceChains.Systems
         /// </summary>
         private string GetBuildingConfigFilePath()
         {
-            // Save in the user's local application data folder
             string userDataPath = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-            string modPath = Path.Combine(userDataPath, "Colossal Order", "Cities Skylines II", "ModsData", "ManageResourceChains");
-            return Path.Combine(modPath, "resource_chain_configs.json");
+            string modPath = Path.Combine(userDataPath, "Colossal Order", "Cities Skylines II", "ModsData", "Mod");
+            return Path.Combine(modPath, "configs.json");
         }
 
         /// <summary>
@@ -431,30 +430,17 @@ namespace ManageResourceChains.Systems
                 // Ensure config exists for this entity
                 if (!configDictionary.TryGetValue(_currentBuildingEntityId, out var config))
                 {
-                    config = new Data.BuildingConfiguration
-                    {
-                        BuildingEntityId = _currentBuildingEntityId,
-                        Rules = new List<Data.ResourceChainRule>()
-                    };
-                    configDictionary[_currentBuildingEntityId] = config;
+                    Mod.log.Warn($"Config not found for {entityType} {_currentBuildingEntityId}, this should not happen");
+                    return;
                 }
                 
-                // Find or create the rule
+                // Find the rule - it should already exist since we saved config before starting picker
                 var rule = config.Rules.FirstOrDefault(r => r.Id == _currentRuleId);
                 if (rule == null)
                 {
-                    rule = new Data.ResourceChainRule
-                    {
-                        Id = _currentRuleId,
-                        Color = "#FF0000",
-                        Type = Data.ChainType.Incoming,
-                        Allow = Data.AllowType.Allow,
-                        TransportType = Data.TransportType.Resources,
-                        Buildings = new List<int>(),
-                        Districts = new List<int>(),
-                        TransportPriorities = new List<Data.TransportPriority>()
-                    };
-                    config.Rules.Add(rule);
+                    Mod.log.Warn($"Rule {_currentRuleId} not found in config for {entityType} {_currentBuildingEntityId}");
+                    // Don't create a new rule with defaults - this would reset user's choices
+                    return;
                 }
                 
                 // Add building to the rule if not already present
@@ -486,14 +472,13 @@ namespace ManageResourceChains.Systems
                 Mod.log.Info("Confirming building picker selection");
                 
                 // Buildings are already added to the config via OnBuildingSelected
-                // Just save and deactivate the picker
-                SaveConfigurations();
+                // Don't save here - user must click "Save All Changes" to save
                 
                 // Deactivate tool
                 _buildingPickerToolSystem.ConfirmSelection();
                 _buildingPickerActiveBinding.Update(false);
                 
-                Mod.log.Info("Building picker confirmed and saved");
+                Mod.log.Info("Building picker confirmed");
             }
             catch (Exception ex)
             {
