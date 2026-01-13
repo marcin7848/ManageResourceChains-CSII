@@ -352,12 +352,37 @@ The `ResourceChainPathfindSystem` runs in the `GameSimulation` phase and:
 1. **Queries all workers** in the game using ECS entity queries
 2. **Gets each worker's home and workplace** by following the component relationships (Worker → HouseholdMember → PropertyRenter)
 3. **Checks if buildings belong to districts** using the `CurrentDistrict` component
-4. **Checks rules** in this order:
+4. **Retrieves configurations** from the unified active configuration dictionary using entity ID and type
+5. **Checks rules** in this order:
    - Building-level rules for home (OUTGOING)
    - Building-level rules for workplace (INCOMING)
    - District-level rules for home district (OUTGOING)
    - District-level rules for workplace district (INCOMING)
-5. **Removes violating workers** from the workplace's employee list and removes their Worker component
+6. **Removes violating workers** from the workplace's employee list and removes their Worker component
+
+**Configuration Access**:
+```csharp
+// Unified configuration access using compound keys
+Dictionary<string, BuildingConfiguration> _activeConfigurations;
+
+// Get building config: key = "entityId_Building"
+var buildingKey = GetConfigKey(buildingEntityId, EntityType.Building);
+if (_activeConfigurations.TryGetValue(buildingKey, out var buildingConfig))
+{
+    // Process building rules
+}
+
+// Get district config: key = "districtId_District"
+var districtKey = GetConfigKey(districtEntityId, EntityType.District);
+if (_activeConfigurations.TryGetValue(districtKey, out var districtConfig))
+{
+    // Process district rules
+}
+```
+
+**Key Method**:
+- `GetConfigKey(int entityId, EntityType type)` - Generates compound key for unified storage
+- Returns: `"{entityId}_{type}"` format for dictionary lookups
 
 ### Rule Logic (Whitelist/Blacklist)
 
@@ -453,15 +478,92 @@ District-level rules apply to ALL buildings within a district automatically, pro
 
 ### Data Storage
 
-**Building Rules** are persisted in JSON files:
-- Location: `%LocalAppData%Low\Colossal Order\Cities Skylines II\ModsData\ManageResourceChains\`
-- Filename format: `building_{entityId}.json`
-- Contains building ID, rules array with type, allow/disallow, transport type, and target building lists
+**Unified Configuration System**:
+All rules (both building and district) are persisted in a single unified JSON file:
 
-**District Rules** are persisted in JSON files:
-- Location: `%LocalAppData%Low\Colossal Order\Cities Skylines II\ModsData\ManageResourceChains\`
-- Filename format: `district_{entityId}.json`
-- Contains district ID, rules array with same structure as building rules
+- **Location**: `%LocalAppData%\Colossal Order\Cities Skylines II\ModsData\ManageResourceChains\`
+- **Filename**: `entity_chain_configs.json`
+- **Structure**: Single array containing all entity configurations with type discrimination
+
+**Configuration Structure**:
+```json
+[
+  {
+    "BuildingEntityId": 12345,
+    "Type": "Building",
+    "Rules": [
+      {
+        "Id": "rule-guid-here",
+        "Color": "#FF0000",
+        "Type": "Outgoing",
+        "Allow": "Disallow",
+        "TransportType": "Workers",
+        "Buildings": [67890, 11111],
+        "Districts": [],
+        "TransportPriorities": [],
+        "SpecificResources": [],
+        "WorkerEducationLevels": []
+      }
+    ]
+  },
+  {
+    "BuildingEntityId": 67890,
+    "Type": "District",
+    "Rules": [...]
+  }
+]
+```
+
+**Key Fields**:
+- `BuildingEntityId`: The entity ID (works for both buildings and districts despite the name)
+- `Type`: Either `"Building"` or `"District"` - discriminates the entity type
+- `Rules`: Array of rule configurations for this entity
+
+**EntityType Enum**:
+```csharp
+public enum EntityType
+{
+    Building,
+    District
+}
+```
+
+**Benefits of Unified System**:
+- Single file to back up/restore
+- Easier to manage and debug
+- Cleaner data structure
+- No duplication between building and district handling code
+- Easy to extend with new entity types (e.g., regions, neighborhoods)
+
+### Configuration Management & Save Behavior
+
+**Staging System**:
+The mod uses a two-tier configuration system to prevent unintended changes to active gameplay:
+
+1. **Active Configurations** (used by game logic):
+   - These are the live configurations that control pathfinding and worker enforcement
+   - Only updated when "Save all changes" is clicked
+   - Stored in static dictionaries for game systems to access
+   - Key format: `"entityId_Type"` (e.g., `"12345_Building"` or `"67890_District"`)
+
+2. **Staging Configurations** (used by UI):
+   - Temporary configurations for editing in the UI
+   - All UI changes (add/remove/update rules, pick buildings) only affect staging
+   - Never used by game logic until committed
+   - Discarded if panel is closed without saving
+
+**Save Workflow**:
+1. User opens configuration panel → Staging config is initialized from active config (or empty if new)
+2. User makes changes (add rules, pick buildings, etc.) → Changes applied only to staging
+3. User clicks "Save all changes" → Staging configs are committed to active configs → Active configs saved to disk → Game logic now uses new rules
+4. User closes without saving → Staging configs discarded → No changes persist
+
+**Benefits**:
+- Rules don't affect gameplay until explicitly saved
+- Can experiment with rules without breaking active game
+- Changes are cancellable (close panel without saving)
+- Predictable behavior - game doesn't change unexpectedly during editing
+- Clean separation between UI state and game state
 
 ### Current Limitations
 
@@ -502,3 +604,22 @@ The same enforcement pattern can be extended to other transport types:
 - Implement both proactive filtering and reactive enforcement
 - Maintain performance with comprehensive logging for debugging
 
+---
+
+## Public API for Game Systems
+
+The ResourceChainManagementSystem provides a backward-compatible API for pathfinding and other game systems to access configurations:
+
+**Get All Building Configurations**:
+This method returns only configurations where the Type equals Building. It filters the unified dictionary to return building-only configurations, with the entity ID as the dictionary key.
+
+**Get All District Configurations**:
+This method returns only configurations where the Type equals District. It filters the unified dictionary to return district-only configurations, with the entity ID as the dictionary key.
+
+**Get Specific Building Configuration**:
+A static method that returns the configuration for a specific building entity. If no configuration is found, it returns an empty configuration object. This is used by pathfinding systems to check rules for individual buildings.
+
+**Implementation Approach**:
+The pathfinding system retrieves the management system instance from the World, then calls the appropriate getter method to obtain all building configurations for iteration. When checking rules for a specific building, it uses the static method to get that building's configuration directly.
+
+**Note**: These methods provide a filtered view of the unified configuration system, maintaining compatibility with existing code while internally using the unified storage with EntityType discrimination. This design ensures that older code expecting separate building and district dictionaries continues to work without modifications.
