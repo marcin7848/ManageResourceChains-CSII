@@ -578,9 +578,6 @@ namespace ManageResourceChains.Systems
             try
             {
                 _currentEntityType = isDistrict ? Data.EntityType.District : Data.EntityType.Building;
-                string entityTypeName = isDistrict ? "district" : "building";
-                Mod.log.Info($"Starting district picker for {entityTypeName} {entityId}, rule {ruleId}");
-                
                 _currentEntityId = entityId;
                 _currentRuleId = ruleId;
                 _isPickingDistricts = true;
@@ -588,8 +585,6 @@ namespace ManageResourceChains.Systems
                 // Activate the tool - this blocks DefaultToolSystem and prevents context switching
                 _toolSystem.activeTool = _districtPickerToolSystem;
                 _districtPickerActiveBinding.Update(true);
-                
-                Mod.log.Info("District picker tool activated (blocks DefaultToolSystem)");
             }
             catch (Exception ex)
             {
@@ -605,16 +600,12 @@ namespace ManageResourceChains.Systems
             try
             {
                 int districtId = districtEntity.Index;
-                string entityTypeName = _currentEntityType == Data.EntityType.Building ? "building" : "district";
-                Mod.log.Info($"District {districtId} selected for {entityTypeName} {_currentEntityId}, updating staging");
-                
                 string key = GetConfigKey(_currentEntityId, _currentEntityType);
                 var configBinding = _currentEntityType == Data.EntityType.Building ? _resourceChainConfigBinding : _districtConfigBinding;
                 
                 // Ensure config exists for this entity in staging
                 if (!_stagingConfigurations.TryGetValue(key, out var config))
                 {
-                    Mod.log.Warn($"Staging config not found for {entityTypeName} {_currentEntityId}, this should not happen");
                     return;
                 }
                 
@@ -622,7 +613,6 @@ namespace ManageResourceChains.Systems
                 var rule = config.Rules.FirstOrDefault(r => r.Id == _currentRuleId);
                 if (rule == null)
                 {
-                    Mod.log.Warn($"Rule {_currentRuleId} not found in staging config for {entityTypeName} {_currentEntityId}");
                     return;
                 }
                 
@@ -630,13 +620,10 @@ namespace ManageResourceChains.Systems
                 if (!rule.Districts.Contains(districtId))
                 {
                     rule.Districts.Add(districtId);
-                    Mod.log.Info($"✓ Added district {districtId} to {entityTypeName} rule {_currentRuleId} in staging");
                     
                     // Send updated config to UI immediately
                     string json = JsonConvert.SerializeObject(config, Formatting.Indented);
                     configBinding.Update(json);
-                    
-                    Mod.log.Info($"UI updated with new district for {entityTypeName} (staging only, not applied to game logic)");
                 }
             }
             catch (Exception ex)
@@ -652,13 +639,9 @@ namespace ManageResourceChains.Systems
         {
             try
             {
-                Mod.log.Info("Confirming district picker selection");
-                
                 _districtPickerToolSystem.ConfirmSelection();
                 _isPickingDistricts = false;
                 _districtPickerActiveBinding.Update(false);
-                
-                Mod.log.Info("District picker confirmed (changes in staging, user must click 'Save All Changes')");
             }
             catch (Exception ex)
             {
@@ -673,13 +656,9 @@ namespace ManageResourceChains.Systems
         {
             try
             {
-                Mod.log.Info("Cancelling district picker");
-                
                 _districtPickerToolSystem.CancelSelection();
                 _isPickingDistricts = false;
                 _districtPickerActiveBinding.Update(false);
-                
-                Mod.log.Info("District picker cancelled");
             }
             catch (Exception ex)
             {
@@ -765,8 +744,6 @@ namespace ManageResourceChains.Systems
                 // Serialize and send to UI
                 string json = JsonConvert.SerializeObject(districtList);
                 _allDistrictsBinding.Update(json);
-                
-                Mod.log.Info($"Sent {districtList.Count} districts to UI");
             }
             catch (Exception ex)
             {
@@ -782,15 +759,12 @@ namespace ManageResourceChains.Systems
         {
             try
             {
-                Mod.log.Info($"Adding district {districtId} to rule {ruleId} for entity {entityId}");
-                
                 // For now, assume building entity type - UI should pass this
                 string key = GetConfigKey(entityId, Data.EntityType.Building);
                 
                 // Ensure config exists in staging
                 if (!_stagingConfigurations.TryGetValue(key, out var config))
                 {
-                    Mod.log.Warn($"No staging config found for entity {entityId}");
                     return;
                 }
                 
@@ -798,7 +772,6 @@ namespace ManageResourceChains.Systems
                 var rule = config.Rules.FirstOrDefault(r => r.Id == ruleId);
                 if (rule == null)
                 {
-                    Mod.log.Warn($"Rule {ruleId} not found in config for entity {entityId}");
                     return;
                 }
                 
@@ -806,15 +779,10 @@ namespace ManageResourceChains.Systems
                 if (!rule.Districts.Contains(districtId))
                 {
                     rule.Districts.Add(districtId);
-                    Mod.log.Info($"✓ Added district {districtId} to rule {ruleId}");
                     
                     // Update UI
                     string json = JsonConvert.SerializeObject(config, Formatting.Indented);
                     _resourceChainConfigBinding.Update(json);
-                }
-                else
-                {
-                    Mod.log.Info($"District {districtId} already in rule {ruleId}");
                 }
             }
             catch (Exception ex)

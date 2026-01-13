@@ -28,7 +28,6 @@ namespace ManageResourceChains.Systems
         {
             base.OnCreate();
             m_Log = Mod.Log;
-            m_Log.Info($"{nameof(DistrictSelectionUISystem)} created");
             m_SelectedDistrict = Entity.Null;
             
             m_SelectedInfoUISystem = World.GetOrCreateSystemManaged<SelectedInfoUISystem>();
@@ -39,8 +38,6 @@ namespace ManageResourceChains.Systems
             AddBinding(m_IsDistrictSelectedBinding = new ValueBinding<bool>("manageResourceChains", "isDistrictSelected", false));
             AddBinding(m_SelectedDistrictEntityBinding = new ValueBinding<int>("manageResourceChains", "selectedDistrictEntity", 0));
             AddBinding(m_DistrictConfigBinding = new ValueBinding<string>("manageResourceChains", "districtConfig", "{}"));
-            
-            m_Log.Info($"{nameof(DistrictSelectionUISystem)} bindings created");
         }
 
         protected override void OnUpdate()
@@ -58,7 +55,6 @@ namespace ManageResourceChains.Systems
                 {
                     m_SelectedDistrict = selectedEntity;
                     m_SelectedDistrictEntityBinding.Update(selectedEntity.Index);
-                    m_Log.Info($"🏘️ District selected: {selectedEntity.Index} (Version: {selectedEntity.Version})");
                     
                     // TODO: Load district config from storage
                     // For now, return empty config
@@ -69,7 +65,6 @@ namespace ManageResourceChains.Systems
             {
                 if (m_SelectedDistrict != Entity.Null)
                 {
-                    m_Log.Info($"🏘️ District deselected");
                     m_SelectedDistrict = Entity.Null;
                     m_SelectedDistrictEntityBinding.Update(0);
                     m_DistrictConfigBinding.Update("{}");
@@ -83,7 +78,6 @@ namespace ManageResourceChains.Systems
         public void SetSelectedDistrict(Entity district)
         {
             m_SelectedDistrict = district;
-            m_Log.Info($"Selected district: {district.Index} (Version: {district.Version})");
         }
 
         /// <summary>
@@ -102,12 +96,7 @@ namespace ManageResourceChains.Systems
             if (entity == Entity.Null)
                 return false;
 
-            // Check if entity has District component
-            bool hasDistrict = EntityManager.HasComponent<District>(entity);
-            
-            m_Log.Info($"IsValidDistrict({entity.Index}): {hasDistrict}");
-            
-            return hasDistrict;
+            return EntityManager.HasComponent<District>(entity);
         }
     }
 }

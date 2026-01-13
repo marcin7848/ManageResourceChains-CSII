@@ -49,12 +49,9 @@ namespace ManageResourceChains.Systems
         public override void InitializeRaycast()
         {
             base.InitializeRaycast();
-            // Try both ground and areas - cast to whatever we can hit
             m_ToolRaycastSystem.collisionMask = CollisionMask.OnGround | CollisionMask.Overground;
-            m_ToolRaycastSystem.typeMask = TypeMask.Terrain | TypeMask.Areas; // Try both!
+            m_ToolRaycastSystem.typeMask = TypeMask.Terrain | TypeMask.Areas;
             m_ToolRaycastSystem.areaTypeMask = AreaTypeMask.Districts;
-            
-            m_Log.Info($"DistrictPickerTool raycast configured: TypeMask={m_ToolRaycastSystem.typeMask}, AreaTypeMask={m_ToolRaycastSystem.areaTypeMask}");
         }
 
         /// <inheritdoc/>
@@ -90,7 +87,6 @@ namespace ManageResourceChains.Systems
             base.OnCreate();
             Enabled = false;
             m_Log = Mod.Log;
-            m_Log.Info($"{nameof(DistrictPickerToolSystem)}.{nameof(OnCreate)}");
             m_Barrier = World.GetOrCreateSystemManaged<ToolOutputBarrier>();
             m_ResourceChainManagementSystem = World.GetOrCreateSystemManaged<ResourceChainManagementSystem>();
             m_SelectedInfoUISystem = World.GetOrCreateSystemManaged<SelectedInfoUISystem>();
@@ -118,7 +114,6 @@ namespace ManageResourceChains.Systems
             base.OnStartRunning();
             m_SelectedDistricts.Clear();
             applyAction.shouldBeEnabled = true;
-            m_Log.Info($"✅ {nameof(DistrictPickerToolSystem)} STARTED RUNNING - tool active, blocking DefaultToolSystem");
         }
 
         /// <inheritdoc/>
@@ -127,45 +122,27 @@ namespace ManageResourceChains.Systems
             base.OnStopRunning();
             EntityManager.AddComponent<BatchesUpdated>(m_HighlightedQuery);
             EntityManager.RemoveComponent<Highlighted>(m_HighlightedQuery);
-            m_Log.Info($"⛔ {nameof(DistrictPickerToolSystem)} STOPPED RUNNING");
         }
 
         /// <inheritdoc/>
         protected override JobHandle OnUpdate(JobHandle inputDeps)
         {
-            // Log every update to see if tool is running
-            if (UnityEngine.Time.frameCount % 60 == 0) // Every 60 frames (about once per second)
-            {
-                m_Log.Info($"🔄 DistrictPickerTool OnUpdate running (tool is active)");
-            }
-            
-            // Check for any raycast results
+            // Check for raycast results
             if (GetRaycastResult(out Entity hitEntity, out RaycastHit hit))
             {
-                bool hasDistrict = EntityManager.HasComponent<District>(hitEntity);
-                
-                // Only log if it's a district or if we want to debug everything
-                if (hasDistrict)
+                // Handle click to select district
+                if (EntityManager.HasComponent<District>(hitEntity) && applyAction.WasReleasedThisFrame())
                 {
-                    m_Log.Info($"🎯 Raycast hit! Entity: {hitEntity.Index}, HasDistrict: {hasDistrict}");
-                    
-                    // Handle click to select district
-                    if (applyAction.WasReleasedThisFrame())
-                    {
-                        m_Log.Info($"✅ District {hitEntity.Index} clicked in tool - adding to rule");
-                        m_ResourceChainManagementSystem.OnDistrictSelected(hitEntity);
-                    }
+                    m_ResourceChainManagementSystem.OnDistrictSelected(hitEntity);
                 }
             }
             
             // Check for Escape key to cancel
             if (cancelAction.WasPressedThisFrame())
             {
-                m_Log.Info("⚠️ Escape pressed - cancelling district picker");
                 m_ResourceChainManagementSystem.CancelDistrictPicker();
             }
             
-            // This tool blocks DefaultToolSystem from processing clicks
             return inputDeps;
         }
     }

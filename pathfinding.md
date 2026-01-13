@@ -567,6 +567,252 @@ The mod uses a two-tier configuration system to prevent unintended changes to ac
 
 ### Current Limitations
 
+1. Reactive-only enforcement (doesn't prevent job assignment)
+2. No filtering by education level or worker type
+3. No time-based or conditional rules
+4. District detection relies on game's CurrentDistrict component
+
+---
+
+## How Rules Work: Buildings and Districts
+
+### Understanding Rule Targets
+
+When creating a rule, you can specify targets in two ways:
+1. **Specific Buildings**: Individual buildings picked directly from the game world
+2. **Districts**: All buildings within a district boundary
+
+Both can be mixed in the same rule - you can have some specific buildings AND some districts.
+
+### Rule Application Logic
+
+#### Building-Level Rules
+
+**What they control**: Rules created for a specific building (residential, commercial, or industrial).
+
+**Picking Buildings**:
+- Click the "+ Building" button in the manage panel
+- Use the building picker to click buildings directly in the game world
+- Each building is added individually to the rule
+- You see the building entity ID in the list
+
+**Picking Districts**:
+- Click the "+ District" button in the manage panel
+- Use the district picker to click districts directly in the game world
+- All buildings within that district are affected by the rule
+- You see the district entity ID in the list
+
+**How it works**:
+- When a worker/resource/service tries to go from/to this building, the rule checks:
+  - Is the target building directly in my Buildings list? If yes → rule applies
+  - Is the target building in one of my Districts? If yes → rule applies
+  - If either condition is true, the rule takes effect
+
+**Example**: Residential Building A with rule "OUTGOING DISALLOW WORKERS → Building X, District 1"
+- Workers from Building A cannot go to Building X (specific building)
+- Workers from Building A cannot go to ANY building in District 1
+- Workers from Building A can go to buildings in other districts
+
+#### District-Level Rules
+
+**What they control**: Rules created for an entire district. All buildings in that district are affected.
+
+**Picking Buildings**:
+- Click the "+ Building" button in the district's manage panel
+- Use the building picker to click specific buildings
+- Rule applies to interactions between district buildings and those specific buildings
+
+**Picking Districts**:
+- Click the "+ District" button in the district's manage panel
+- Use the district picker to click other districts
+- Rule applies to interactions between buildings in your district and buildings in the target district
+
+**How it works**:
+- When any worker/resource/service tries to go from/to ANY building in this district, the rule checks:
+  - Is the target building directly in my Buildings list? If yes → rule applies
+  - Is the target building in one of my Districts? If yes → rule applies
+  - All buildings in the district follow the same rule
+
+**Example**: District 1 with rule "INCOMING DISALLOW WORKERS → District 2"
+- Workers from ANY building in District 2 cannot enter ANY building in District 1
+- This creates a district-wide barrier between the two districts
+
+### Rule Direction and Type
+
+#### OUTGOING Rules
+
+**Building Context**: Controls where things can GO FROM this building.
+- "OUTGOING DISALLOW WORKERS → District 1": Workers living here cannot work in District 1
+- "OUTGOING ALLOW SERVICES → Building X": Services from here can only go to Building X
+
+**District Context**: Controls where things can GO FROM buildings in this district.
+- "OUTGOING DISALLOW RESOURCES → District 2": Resources cannot be sent from this district to District 2
+- Applied to ALL buildings in the district
+
+#### INCOMING Rules
+
+**Building Context**: Controls where things can COME FROM to this building.
+- "INCOMING DISALLOW WORKERS → District 3": Workers from District 3 cannot work here
+- "INCOMING ALLOW RESOURCES → Building Y": Only accept resources from Building Y
+
+**District Context**: Controls where things can COME FROM to buildings in this district.
+- "INCOMING DISALLOW WORKERS → District 4": Workers from District 4 cannot work anywhere in this district
+- Applied to ALL buildings in the district
+
+### ALLOW vs DISALLOW
+
+#### DISALLOW (Blacklist Mode)
+
+**Behavior**: Block only the listed buildings/districts, allow everything else.
+
+**Example**: "OUTGOING DISALLOW WORKERS → District 1"
+- Workers CANNOT go to buildings in District 1
+- Workers CAN go to all other districts
+- Useful for creating exclusions
+
+**Use cases**:
+- "Don't send workers to the industrial district"
+- "Don't accept resources from the polluted area"
+- "Block service vehicles from this dangerous zone"
+
+#### ALLOW (Whitelist Mode)
+
+**Behavior**: Allow only the listed buildings/districts, block everything else.
+
+**Example**: "OUTGOING ALLOW WORKERS → District 1, Building X"
+- Workers CAN ONLY go to District 1 or Building X
+- Workers CANNOT go anywhere else
+- Useful for creating strict restrictions
+
+**Use cases**:
+- "Workers can only work in the downtown district"
+- "Accept resources only from this specific factory"
+- "Services can only come from the central district"
+
+### Mixed Rules: Buildings + Districts
+
+You can combine specific buildings and districts in the same rule for fine-grained control.
+
+**Example**: "OUTGOING DISALLOW WORKERS → Building A, Building B, District 1, District 2"
+- Workers cannot go to Building A
+- Workers cannot go to Building B
+- Workers cannot go to ANY building in District 1
+- Workers cannot go to ANY building in District 2
+- Workers can go anywhere else
+
+**How checking works**:
+1. Check if target is in Buildings list → If yes, rule applies
+2. Check if target is in one of the Districts → If yes, rule applies
+3. If either check passes, apply the ALLOW/DISALLOW logic
+
+### Practical Examples
+
+#### Example 1: Residential District Restricting Work Locations
+
+**Setup**: District "Suburbs" with rule "OUTGOING DISALLOW WORKERS → District 'Industrial Zone'"
+
+**Effect**:
+- Residents of ANY building in Suburbs cannot work in ANY building in Industrial Zone
+- They can work in other districts (Commercial, Downtown, etc.)
+- This simulates zoning restrictions or commute preferences
+
+#### Example 2: Factory Controlling Resource Sources
+
+**Setup**: Building "Main Factory" with rule "INCOMING ALLOW RESOURCES → District 'Warehouse District', Building 'Special Supplier'"
+
+**Effect**:
+- Main Factory accepts resources ONLY from:
+  - Buildings in Warehouse District
+  - The specific Special Supplier building
+- All other resource deliveries are blocked
+- This creates a controlled supply chain
+
+#### Example 3: District-to-District Barrier
+
+**Setup**: 
+- District 1: "OUTGOING DISALLOW WORKERS → District 2"
+- District 2: "OUTGOING DISALLOW WORKERS → District 1"
+
+**Effect**:
+- Workers from District 1 cannot work in District 2
+- Workers from District 2 cannot work in District 1
+- Creates complete separation between two districts
+
+#### Example 4: Mixed Targets for Granular Control
+
+**Setup**: Building "Hospital" with rule "INCOMING ALLOW WORKERS → District 'Medical District', Building 'University', Building 'Research Center'"
+
+**Effect**:
+- Hospital accepts workers ONLY from:
+  - ANY building in Medical District (trained medical professionals)
+  - University building (researchers)
+  - Research Center building (specialists)
+- All other workers are blocked
+- This simulates professional qualification requirements
+
+### Rule Priority and Evaluation Order
+
+**Evaluation order**:
+1. Building-level rules are checked first
+2. If no building-level rule applies, district-level rules are checked
+3. First matching rule takes effect
+4. If no rules match, transport is allowed
+
+**Priority**:
+- Building-specific rules override district-wide rules
+- This allows exceptions: "District disallows X, but THIS building allows X"
+
+**Example of priority**:
+- District 1 has rule: "INCOMING DISALLOW WORKERS → District 2"
+- Building A (in District 1) has rule: "INCOMING ALLOW WORKERS → District 2"
+- Result: Most buildings in District 1 block District 2 workers, but Building A accepts them
+
+### Transport Types
+
+Rules can be created for three types of transport:
+
+**WORKERS**: Citizens commuting to work
+- Controls job access and worker pathfinding
+- Most common use case for managing urban planning
+
+**RESOURCES**: Industrial goods, materials, products
+- Controls resource deliveries and supply chains
+- Useful for managing industrial zones and trade
+
+**SERVICES**: City services (garbage, healthcare, fire, police)
+- Controls service vehicle access
+- Useful for managing service coverage and emergency access
+
+Each rule specifies ONE transport type. To control multiple types, create multiple rules.
+
+### Best Practices
+
+**Use Districts for Area-Wide Control**:
+- Instead of clicking 50 individual buildings, click one district
+- Much faster to set up
+- Automatically includes new buildings built in the district
+
+**Use Specific Buildings for Exceptions**:
+- Add specific buildings to create exceptions to district rules
+- Example: "Allow this factory in industrial district, disallow all others"
+
+**Combine Buildings and Districts**:
+- Start with districts for broad control
+- Add specific buildings for edge cases
+- Creates flexible, powerful rule sets
+
+**Use DISALLOW for Simple Restrictions**:
+- "Don't do X" is easier to manage than "Only do Y"
+- Fewer items to maintain in the list
+
+**Use ALLOW for Strict Control**:
+- When you need tight restrictions
+- When you want predictable, controlled behavior
+
+---
+
+### Current Limitations
+
 1. Workers are removed after being hired, not prevented from hiring initially
 2. No filtering by education level or worker type
 3. No time-based or conditional rules

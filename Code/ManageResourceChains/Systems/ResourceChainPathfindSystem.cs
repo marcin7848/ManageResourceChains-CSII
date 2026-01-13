@@ -217,7 +217,9 @@ namespace ManageResourceChains.Systems
                         // Check OUTGOING rules from HOME
                         if (rule.Type == ChainType.Outgoing && config.BuildingEntityId == homeBuilding)
                         {
-                            bool isInList = rule.Buildings.Contains(workplaceBuilding);
+                            // Check if workplace is directly in the buildings list OR in one of the listed districts
+                            bool isInList = rule.Buildings.Contains(workplaceBuilding) ||
+                                          (workplaceDistrict != Entity.Null && rule.Districts.Contains(workplaceDistrict.Index));
                             
                             if (rule.Allow == AllowType.Disallow)
                             {
@@ -240,7 +242,9 @@ namespace ManageResourceChains.Systems
                         // Check INCOMING rules to WORKPLACE
                         if (rule.Type == ChainType.Incoming && config.BuildingEntityId == workplaceBuilding)
                         {
-                            bool isInList = rule.Buildings.Contains(homeBuilding);
+                            // Check if home is directly in the buildings list OR in one of the listed districts
+                            bool isInList = rule.Buildings.Contains(homeBuilding) ||
+                                          (homeDistrict != Entity.Null && rule.Districts.Contains(homeDistrict.Index));
                             
                             if (rule.Allow == AllowType.Disallow)
                             {
@@ -278,7 +282,9 @@ namespace ManageResourceChains.Systems
                         // Check OUTGOING rules from HOME DISTRICT
                         if (rule.Type == ChainType.Outgoing)
                         {
-                            bool isInList = rule.Buildings.Contains(workplaceBuilding);
+                            // Check if workplace is directly in the buildings list OR in one of the listed districts
+                            bool isInList = rule.Buildings.Contains(workplaceBuilding) ||
+                                          (workplaceDistrict != Entity.Null && rule.Districts.Contains(workplaceDistrict.Index));
                             
                             if (rule.Allow == AllowType.Disallow)
                             {
@@ -312,7 +318,9 @@ namespace ManageResourceChains.Systems
                         // Check INCOMING rules to WORKPLACE DISTRICT
                         if (rule.Type == ChainType.Incoming)
                         {
-                            bool isInList = rule.Buildings.Contains(homeBuilding);
+                            // Check if home is directly in the buildings list OR in one of the listed districts
+                            bool isInList = rule.Buildings.Contains(homeBuilding) ||
+                                          (homeDistrict != Entity.Null && rule.Districts.Contains(homeDistrict.Index));
                             
                             if (rule.Allow == AllowType.Disallow)
                             {
@@ -384,7 +392,9 @@ namespace ManageResourceChains.Systems
                         // Check OUTGOING rules from SOURCE
                         if (rule.Type == ChainType.Outgoing && config.BuildingEntityId == sourceBuilding)
                         {
-                            bool isInList = rule.Buildings.Contains(targetBuilding);
+                            // Check if target is directly in the buildings list OR in one of the listed districts
+                            bool isInList = rule.Buildings.Contains(targetBuilding) ||
+                                          (targetDistrict != Entity.Null && rule.Districts.Contains(targetDistrict.Index));
                             
                             if (rule.Allow == AllowType.Disallow)
                             {
@@ -407,7 +417,9 @@ namespace ManageResourceChains.Systems
                         // Check INCOMING rules to TARGET
                         if (rule.Type == ChainType.Incoming && config.BuildingEntityId == targetBuilding)
                         {
-                            bool isInList = rule.Buildings.Contains(sourceBuilding);
+                            // Check if source is directly in the buildings list OR in one of the listed districts
+                            bool isInList = rule.Buildings.Contains(sourceBuilding) ||
+                                          (sourceDistrict != Entity.Null && rule.Districts.Contains(sourceDistrict.Index));
                             
                             if (rule.Allow == AllowType.Disallow)
                             {
@@ -445,7 +457,9 @@ namespace ManageResourceChains.Systems
                         // Check OUTGOING rules from SOURCE DISTRICT
                         if (rule.Type == ChainType.Outgoing)
                         {
-                            bool isInList = rule.Buildings.Contains(targetBuilding);
+                            // Check if target is directly in the buildings list OR in one of the listed districts
+                            bool isInList = rule.Buildings.Contains(targetBuilding) ||
+                                          (targetDistrict != Entity.Null && rule.Districts.Contains(targetDistrict.Index));
                             
                             if (rule.Allow == AllowType.Disallow)
                             {
@@ -479,7 +493,9 @@ namespace ManageResourceChains.Systems
                         // Check INCOMING rules to TARGET DISTRICT
                         if (rule.Type == ChainType.Incoming)
                         {
-                            bool isInList = rule.Buildings.Contains(sourceBuilding);
+                            // Check if source is directly in the buildings list OR in one of the listed districts
+                            bool isInList = rule.Buildings.Contains(sourceBuilding) ||
+                                          (sourceDistrict != Entity.Null && rule.Districts.Contains(sourceDistrict.Index));
                             
                             if (rule.Allow == AllowType.Disallow)
                             {
