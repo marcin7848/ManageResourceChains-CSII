@@ -35,6 +35,7 @@ const selectedBuildingEntity$ = bindValue<number>("manageResourceChains", "selec
 const resourceChainConfig$ = bindValue<string>("manageResourceChains", "resourceChainConfig", "{}");
 const buildingPickerActive$ = bindValue<boolean>("manageResourceChains", "buildingPickerActive", false);
 const districtPickerActive$ = bindValue<boolean>("manageResourceChains", "districtPickerActive", false);
+const priorityPickerActive$ = bindValue<boolean>("manageResourceChains", "priorityPickerActive", false);
 
 // District bindings
 const isDistrictSelected$ = bindValue<boolean>("manageResourceChains", "isDistrictSelected", false);
@@ -76,7 +77,8 @@ const ResourceChainRuleComponent: React.FC<{
 }> = ({ rule, entityId, fullConfig, onUpdate, onDelete, isDistrict = false }) => {
     const buildingPickerActive = useValue(buildingPickerActive$);
     const districtPickerActive = useValue(districtPickerActive$);
-    const anyPickerActive = buildingPickerActive || districtPickerActive;
+    const priorityPickerActive = useValue(priorityPickerActive$);
+    const anyPickerActive = buildingPickerActive || districtPickerActive || priorityPickerActive;
     
     const startBuildingPicker = () => {
         // Only start picking if not already picking
@@ -106,6 +108,22 @@ const ResourceChainRuleComponent: React.FC<{
             // Small delay to ensure config is updated before starting picker
             setTimeout(() => {
                 trigger("manageResourceChains", "startDistrictPicker", entityId, rule.id, isDistrict);
+            }, 50);
+        }
+    };
+    
+    const startPriorityPicker = () => {
+        // Only start picking if not already picking
+        if (!anyPickerActive) {
+            // Save current config to C# memory (not to disk) so the rule exists there
+            // This is required for OnPrioritySelected to work
+            const json = JSON.stringify(fullConfig);
+            const saveType = isDistrict ? "saveDistrictConfig" : "saveBuildingConfig";
+            trigger("manageResourceChains", saveType, entityId, json);
+            
+            // Small delay to ensure config is updated before starting picker
+            setTimeout(() => {
+                trigger("manageResourceChains", "startPriorityPicker", entityId, rule.id, isDistrict);
             }, 50);
         }
     };
@@ -450,22 +468,44 @@ const ResourceChainRuleComponent: React.FC<{
                     }}>
                         <span>Transport Priorities</span>
                         <button
+                            onClick={startPriorityPicker}
+                            disabled={anyPickerActive}
                             style={{
                                 padding: '2rem 6rem',
-                                backgroundColor: 'rgba(0,150,255,0.3)',
-                                border: '1px solid rgba(0,150,255,0.5)',
+                                backgroundColor: priorityPickerActive ? 'rgba(255,165,0,0.5)' : 'rgba(0,150,255,0.3)',
+                                border: `1px solid ${priorityPickerActive ? 'rgba(255,165,0,0.8)' : 'rgba(0,150,255,0.5)'}`,
                                 borderRadius: '2rem',
                                 color: 'white',
-                                cursor: 'pointer',
-                                fontSize: '10rem'
+                                cursor: anyPickerActive ? 'not-allowed' : 'pointer',
+                                fontSize: '10rem',
+                                fontWeight: priorityPickerActive ? 'bold' : 'normal',
+                                opacity: anyPickerActive ? 0.6 : 1
                             }}
+                            title={priorityPickerActive ? 'Picking mode active - click on transport stops in the game' : 'Click to start picking transport priorities'}
                         >
-                            + Priority
+                            {priorityPickerActive ? '🎯 Picking...' : '+ Priority'}
                         </button>
                     </div>
                     
                     {/* Transport priorities list */}
-                    {rule.transportPriorities?.length > 0 && rule.transportPriorities.map((priority, idx) => (
+                    {rule.transportPriorities?.length > 0 && rule.transportPriorities.map((priority, idx) => {
+                        // Convert station type enum to readable name
+                        const stationTypeNames = {
+                            [TransportStationType.TrainStation]: "Train Station",
+                            [TransportStationType.Airport]: "Airport",
+                            [TransportStationType.Port]: "Port",
+                            [TransportStationType.BusStation]: "Bus Station",
+                            [TransportStationType.SubwayStation]: "Subway Station",
+                            [TransportStationType.TramStation]: "Tram Station",
+                            [TransportStationType.BusStop]: "Bus Stop",
+                            [TransportStationType.TramStop]: "Tram Stop",
+                            [TransportStationType.FerryTerminal]: "Ferry Terminal",
+                            [TransportStationType.CargoTerminal]: "Cargo Terminal",
+                            [TransportStationType.TaxiStand]: "Taxi Stand"
+                        };
+                        const stationTypeName = stationTypeNames[priority.stationType] || "Unknown";
+                        
+                        return (
                         <div key={idx} style={{ 
                             display: 'flex', 
                             justifyContent: 'space-between',
@@ -476,7 +516,7 @@ const ResourceChainRuleComponent: React.FC<{
                             borderRadius: '2rem',
                             fontSize: '11rem'
                         }}>
-                            <span>Priority {priority.priority}</span>
+                            <span>{stationTypeName} (Entity: {priority.stationEntity})</span>
                             <button
                                 onClick={() => {
                                     const updatedPriorities = rule.transportPriorities.filter((p) => p.id !== priority.id);
@@ -503,7 +543,8 @@ const ResourceChainRuleComponent: React.FC<{
                                 />
                             </button>
                         </div>
-                    ))}
+                        );
+                    })}
                     
                     {(!rule.transportPriorities || rule.transportPriorities.length === 0) && (
                         <div style={{ 
@@ -532,23 +573,30 @@ const ManageResourceChainsPanel: React.FC<{
     const configJson = useValue(configBinding$) as string;
     const buildingPickerActive = useValue(buildingPickerActive$);
     const districtPickerActive = useValue(districtPickerActive$);
-    const anyPickerActive = buildingPickerActive || districtPickerActive;
+    const priorityPickerActive = useValue(priorityPickerActive$);
+    const anyPickerActive = buildingPickerActive || districtPickerActive || priorityPickerActive;
     const [config, setConfig] = useState<BuildingConfiguration | null>(null);
     const [isLoading, setIsLoading] = useState<boolean>(true);
 
-    // Handle Escape key to cancel district picker
+    // Handle Escape key to cancel pickers
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
-            if (e.key === 'Escape' && districtPickerActive) {
-                trigger("manageResourceChains", "cancelDistrictPicker");
-                e.preventDefault();
-                e.stopPropagation();
+            if (e.key === 'Escape') {
+                if (districtPickerActive) {
+                    trigger("manageResourceChains", "cancelDistrictPicker");
+                    e.preventDefault();
+                    e.stopPropagation();
+                } else if (priorityPickerActive) {
+                    trigger("manageResourceChains", "cancelPriorityPicker");
+                    e.preventDefault();
+                    e.stopPropagation();
+                }
             }
         };
         
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [districtPickerActive]);
+    }, [districtPickerActive, priorityPickerActive]);
 
     useEffect(() => {
         // Request config when entity changes
@@ -729,6 +777,9 @@ const ManageResourceChainsPanel: React.FC<{
                     } else if (districtPickerActive) {
                         trigger("manageResourceChains", "confirmDistrictPicker");
                         e.stopPropagation(); // Prevent event from bubbling
+                    } else if (priorityPickerActive) {
+                        trigger("manageResourceChains", "confirmPriorityPicker");
+                        e.stopPropagation(); // Prevent event from bubbling
                     }
                 }}
             >
@@ -753,6 +804,7 @@ const ManageResourceChainsPanel: React.FC<{
                     }}>
                         {buildingPickerActive && 'Click anywhere on the panel to finish picking buildings'}
                         {districtPickerActive && 'Click anywhere on the panel to finish picking districts'}
+                        {priorityPickerActive && 'Click anywhere on the panel to finish picking transport priorities'}
                     </div>
                 )}
                 

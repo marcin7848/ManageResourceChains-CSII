@@ -67,6 +67,16 @@ namespace ManageResourceChains
                 log.Info("Registering DistrictPickerToolSystem...");
                 updateSystem.UpdateAt<DistrictPickerToolSystem>(SystemUpdatePhase.ToolUpdate);
                 log.Info("DistrictPickerToolSystem registered!");
+                
+                // Register priority picker tool
+                log.Info("Registering PriorityPickerToolSystem...");
+                updateSystem.UpdateAt<PriorityPickerToolSystem>(SystemUpdatePhase.ToolUpdate);
+                log.Info("PriorityPickerToolSystem registered!");
+                
+                // Register transport priority cost system
+                log.Info("Registering TransportPriorityCostSystem...");
+                updateSystem.UpdateAt<TransportPriorityCostSystem>(SystemUpdatePhase.GameSimulation);
+                log.Info("TransportPriorityCostSystem registered!");
             }
             catch (System.Exception ex)
             {

@@ -84,7 +84,13 @@ namespace ManageResourceChains.Data
         Airport,
         Port,
         BusStation,
-        SubwayStation
+        SubwayStation,
+        TramStation,
+        BusStop,
+        TramStop,
+        FerryTerminal,
+        CargoTerminal,
+        TaxiStand
     }
 
     /// <summary>

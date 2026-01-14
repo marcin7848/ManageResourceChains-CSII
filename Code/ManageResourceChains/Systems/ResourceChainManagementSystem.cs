@@ -27,18 +27,21 @@ namespace ManageResourceChains.Systems
         private ValueBinding<string> _districtConfigBinding;
         private ValueBinding<bool> _buildingPickerActiveBinding;
         private ValueBinding<bool> _districtPickerActiveBinding;
+        private ValueBinding<bool> _priorityPickerActiveBinding;
         private ValueBinding<string> _allDistrictsBinding;
         
         // Tool systems
         private BuildingPickerToolSystem _buildingPickerToolSystem;
         private DistrictPickerToolSystem _districtPickerToolSystem;
+        private PriorityPickerToolSystem _priorityPickerToolSystem;
         private ToolSystem _toolSystem;
         
         // State for tracking picker
         private string _currentRuleId;
         private int _currentEntityId;
         private Data.EntityType _currentEntityType;
-        private bool _isPickingDistricts; // Track if we're in district picking mode (don't activate tool, just flag)
+        private bool _isPickingDistricts; 
+        private bool _isPickingPriorities;
         
         protected override void OnCreate()
         {
@@ -48,6 +51,7 @@ namespace ManageResourceChains.Systems
             // Get tool systems
             _buildingPickerToolSystem = World.GetOrCreateSystemManaged<BuildingPickerToolSystem>();
             _districtPickerToolSystem = World.GetOrCreateSystemManaged<DistrictPickerToolSystem>();
+            _priorityPickerToolSystem = World.GetOrCreateSystemManaged<PriorityPickerToolSystem>();
             _toolSystem = World.GetOrCreateSystemManaged<ToolSystem>();
             
             // Add binding to send configuration data to UI
@@ -55,6 +59,7 @@ namespace ManageResourceChains.Systems
             AddBinding(_districtConfigBinding = new ValueBinding<string>("manageResourceChains", "districtConfig", "{}"));
             AddBinding(_buildingPickerActiveBinding = new ValueBinding<bool>("manageResourceChains", "buildingPickerActive", false));
             AddBinding(_districtPickerActiveBinding = new ValueBinding<bool>("manageResourceChains", "districtPickerActive", false));
+            AddBinding(_priorityPickerActiveBinding = new ValueBinding<bool>("manageResourceChains", "priorityPickerActive", false));
             
             // Add method bindings for UI to call
             AddBinding(new TriggerBinding<int>("manageResourceChains", "requestBuildingConfig", RequestBuildingConfig));
@@ -75,6 +80,11 @@ namespace ManageResourceChains.Systems
             AddBinding(new TriggerBinding<int, string, bool>("manageResourceChains", "startDistrictPicker", StartDistrictPicker));
             AddBinding(new TriggerBinding("manageResourceChains", "confirmDistrictPicker", ConfirmDistrictPicker));
             AddBinding(new TriggerBinding("manageResourceChains", "cancelDistrictPicker", CancelDistrictPicker));
+            
+            // Priority picker tool bindings
+            AddBinding(new TriggerBinding<int, string, bool>("manageResourceChains", "startPriorityPicker", StartPriorityPicker));
+            AddBinding(new TriggerBinding("manageResourceChains", "confirmPriorityPicker", ConfirmPriorityPicker));
+            AddBinding(new TriggerBinding("manageResourceChains", "cancelPriorityPicker", CancelPriorityPicker));
             
             // Direct district management (no picker needed)
             AddBinding(new TriggerBinding<int, string, int>("manageResourceChains", "addDistrictToRule", AddDistrictToRule));
@@ -563,11 +573,20 @@ namespace ManageResourceChains.Systems
         #region District Picker Tool
 
         /// <summary>
+        /// <summary>
         /// Check if district picker is currently active
         /// </summary>
         public bool IsDistrictPickerActive()
         {
             return _isPickingDistricts;
+        }
+
+        /// <summary>
+        /// Check if priority picker is currently active
+        /// </summary>
+        public bool IsPriorityPickerActive()
+        {
+            return _isPickingPriorities;
         }
 
         /// <summary>
@@ -668,7 +687,196 @@ namespace ManageResourceChains.Systems
 
         #endregion
 
+        #region Priority Picker Tool
+
+        /// <summary>
+        /// Start priority picker tool
+        /// </summary>
+        private void StartPriorityPicker(int entityId, string ruleId, bool isDistrict)
+        {
+            try
+            {
+                _currentEntityType = isDistrict ? Data.EntityType.District : Data.EntityType.Building;
+                Mod.log.Info($"Starting priority picker for {entityId}, rule {ruleId}");
+                
+                _currentEntityId = entityId;
+                _currentRuleId = ruleId;
+                _isPickingPriorities = true;
+                
+                // Activate the priority picker tool
+                _toolSystem.activeTool = _priorityPickerToolSystem;
+                _priorityPickerActiveBinding.Update(true);
+                
+                Mod.log.Info("Priority picker tool activated");
+            }
+            catch (Exception ex)
+            {
+                Mod.log.Error($"Error starting priority picker: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Called when a transport entity is selected during picking mode
+        /// </summary>
+        public void OnPrioritySelected(Entity priorityEntity)
+        {
+            try
+            {
+                int entityId = priorityEntity.Index;
+                string key = GetConfigKey(_currentEntityId, _currentEntityType);
+                var configBinding = _currentEntityType == Data.EntityType.Building ? _resourceChainConfigBinding : _districtConfigBinding;
+                
+                // Ensure config exists for this entity in staging
+                if (!_stagingConfigurations.TryGetValue(key, out var config))
+                {
+                    return;
+                }
+                
+                // Find the rule
+                var rule = config.Rules.FirstOrDefault(r => r.Id == _currentRuleId);
+                if (rule == null)
+                {
+                    return;
+                }
+                
+                // Determine station type based on ECS components
+                Data.TransportStationType stationType = DetermineStationType(priorityEntity);
+                
+                // Add priority to the rule
+                var priority = new Data.TransportPriority
+                {
+                    Id = Guid.NewGuid().ToString(),
+                    StationEntity = entityId,
+                    StationType = stationType,
+                    Priority = 10 // Default priority
+                };
+                
+                rule.TransportPriorities.Add(priority);
+                Mod.log.Info($"✓ Added priority {stationType} (entity {entityId}) to rule {_currentRuleId} in staging");
+                
+                // Send updated config to UI
+                string json = JsonConvert.SerializeObject(config, Formatting.Indented);
+                configBinding.Update(json);
+            }
+            catch (Exception ex)
+            {
+                Mod.log.Error($"Error in OnPrioritySelected: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Confirm priority picker selection
+        /// </summary>
+        public void ConfirmPriorityPicker()
+        {
+            try
+            {
+                _priorityPickerToolSystem.ConfirmSelection();
+                _isPickingPriorities = false;
+                _priorityPickerActiveBinding.Update(false);
+            }
+            catch (Exception ex)
+            {
+                Mod.log.Error($"Error confirming priority picker: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Cancel priority picker selection
+        /// </summary>
+        public void CancelPriorityPicker()
+        {
+            try
+            {
+                _priorityPickerToolSystem.CancelSelection();
+                _isPickingPriorities = false;
+                _priorityPickerActiveBinding.Update(false);
+            }
+            catch (Exception ex)
+            {
+                Mod.log.Error($"Error cancelling priority picker: {ex.Message}");
+            }
+        }
+        
+        /// <summary>
+        /// Determine the transport station type from an entity's components
+        /// </summary>
+        private Data.TransportStationType DetermineStationType(Entity entity)
+        {
+            try
+            {
+                // Check for specific stop component types (for waypoints/stops)
+                if (EntityManager.HasComponent<Game.Routes.TaxiStand>(entity))
+                    return Data.TransportStationType.TaxiStand;
+                    
+                if (EntityManager.HasComponent<Game.Routes.BusStop>(entity))
+                    return Data.TransportStationType.BusStop;
+                    
+                if (EntityManager.HasComponent<Game.Routes.TramStop>(entity))
+                    return Data.TransportStationType.TramStop;
+                    
+                if (EntityManager.HasComponent<Game.Routes.TrainStop>(entity))
+                    return Data.TransportStationType.TrainStation;
+                    
+                if (EntityManager.HasComponent<Game.Routes.SubwayStop>(entity))
+                    return Data.TransportStationType.SubwayStation;
+                    
+                if (EntityManager.HasComponent<Game.Routes.FerryStop>(entity))
+                    return Data.TransportStationType.FerryTerminal;
+                    
+                if (EntityManager.HasComponent<Game.Routes.ShipStop>(entity))
+                    return Data.TransportStationType.Port;
+                    
+                if (EntityManager.HasComponent<Game.Routes.AirplaneStop>(entity))
+                    return Data.TransportStationType.Airport;
+                
+                // Check for building station types (for buildings)
+                if (EntityManager.HasComponent<Game.Buildings.Building>(entity))
+                {
+                    // Check if it has PrefabRef to inspect the prefab
+                    if (EntityManager.HasComponent<Game.Prefabs.PrefabRef>(entity))
+                    {
+                        var prefabRef = EntityManager.GetComponentData<Game.Prefabs.PrefabRef>(entity);
+                        var prefabEntity = prefabRef.m_Prefab;
+                        
+                        // Check for cargo transport station
+                        if (EntityManager.HasComponent<Game.Prefabs.CargoTransportStationData>(prefabEntity))
+                            return Data.TransportStationType.CargoTerminal;
+                        
+                        // Check for public transport station (could be train, bus, etc.)
+                        if (EntityManager.HasComponent<Game.Prefabs.PublicTransportStationData>(prefabEntity))
+                        {
+                            // Try to determine specific type from the station name or other characteristics
+                            // For now, default to TrainStation for buildings with PublicTransportStationData
+                            return Data.TransportStationType.TrainStation;
+                        }
+                    }
+                    
+                    // Default for buildings
+                    return Data.TransportStationType.BusStation;
+                }
+                
+                // Default fallback
+                return Data.TransportStationType.BusStop;
+            }
+            catch (Exception ex)
+            {
+                Mod.log.Error($"Error determining station type: {ex.Message}");
+                return Data.TransportStationType.BusStop;
+            }
+        }
+
+        #endregion
+
         #region Public API for Game Systems
+
+        /// <summary>
+        /// Get all active configurations (both buildings and districts) - for use by other systems
+        /// </summary>
+        public static Dictionary<string, Data.BuildingConfiguration> GetActiveConfigurations()
+        {
+            return _activeConfigurations;
+        }
 
         /// <summary>
         /// Get all building configurations (for use by other systems like pathfinding)

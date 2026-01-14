@@ -21,7 +21,13 @@ export enum TransportStationType {
     Airport = 1,
     Port = 2,
     BusStation = 3,
-    SubwayStation = 4
+    SubwayStation = 4,
+    TramStation = 5,
+    BusStop = 6,
+    TramStop = 7,
+    FerryTerminal = 8,
+    CargoTerminal = 9,
+    TaxiStand = 10
 }
 
 export interface TransportPriority {
