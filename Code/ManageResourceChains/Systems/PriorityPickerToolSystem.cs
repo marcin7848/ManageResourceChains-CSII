@@ -3,6 +3,7 @@ using Colossal.Logging;
 using Game.Buildings;
 using Game.Common;
 using Game.Input;
+using Game.Net;
 using Game.Objects;
 using Game.Prefabs;
 using Game.Rendering;
@@ -48,12 +49,15 @@ namespace ManageResourceChains.Systems
             // Allow picking both buildings (stations) and waypoints (stops)
             m_ToolRaycastSystem.collisionMask = CollisionMask.OnGround | CollisionMask.Overground;
             m_ToolRaycastSystem.typeMask = TypeMask.StaticObjects | TypeMask.RouteWaypoints | TypeMask.Net;
-            m_ToolRaycastSystem.raycastFlags |= RaycastFlags.SubBuildings | RaycastFlags.Markers | RaycastFlags.NoMainElements;
+            m_ToolRaycastSystem.raycastFlags |= RaycastFlags.SubBuildings | RaycastFlags.Markers | RaycastFlags.NoMainElements | 
+                                                RaycastFlags.Passenger | RaycastFlags.Cargo | RaycastFlags.BuildingLots;
             
-            // Set route type to TransportLine to detect transport stops
+            // Set route type and net layers to detect transport stops
             m_ToolRaycastSystem.routeType = Game.Routes.RouteType.TransportLine;
+            m_ToolRaycastSystem.netLayerMask = Layer.Road | Layer.Pathway | Layer.MarkerPathway | Layer.PublicTransportRoad | 
+                                              Layer.TrainTrack | Layer.TramTrack | Layer.SubwayTrack;
             
-            m_Log.Info($"InitializeRaycast called: typeMask={m_ToolRaycastSystem.typeMask}, routeType={m_ToolRaycastSystem.routeType}, collisionMask={m_ToolRaycastSystem.collisionMask}");
+            m_Log.Info($"InitializeRaycast called: typeMask={m_ToolRaycastSystem.typeMask}, routeType={m_ToolRaycastSystem.routeType}, collisionMask={m_ToolRaycastSystem.collisionMask}, netLayerMask={m_ToolRaycastSystem.netLayerMask}");
         }
 
         /// <summary>
@@ -126,6 +130,27 @@ namespace ManageResourceChains.Systems
                 return inputDeps;
             }
 
+            // If we hit a Route (via RouteWaypoints), resolve the actual waypoint entity
+            if (EntityManager.HasComponent<Route>(currentRaycastEntity) && hit.m_CellIndex.x != -1)
+            {
+                if (EntityManager.HasBuffer<RouteWaypoint>(currentRaycastEntity))
+                {
+                    DynamicBuffer<RouteWaypoint> waypoints = EntityManager.GetBuffer<RouteWaypoint>(currentRaycastEntity);
+                    if (hit.m_CellIndex.x >= 0 && hit.m_CellIndex.x < waypoints.Length)
+                    {
+                        Entity waypointEntity = waypoints[hit.m_CellIndex.x].m_Waypoint;
+                        if (waypointEntity != Entity.Null)
+                        {
+                            if (currentRaycastEntity != m_PreviousRaycastedEntity)
+                            {
+                                m_Log.Info($"Resolved Route {currentRaycastEntity.Index} waypoint index {hit.m_CellIndex.x} to entity {waypointEntity.Index}");
+                            }
+                            currentRaycastEntity = waypointEntity;
+                        }
+                    }
+                }
+            }
+
             // Log what we're hitting
             if (currentRaycastEntity != m_PreviousRaycastedEntity)
             {
@@ -135,11 +160,11 @@ namespace ManageResourceChains.Systems
                 bool hasBuilding = EntityManager.HasComponent<Building>(currentRaycastEntity);
                 bool hasWaypoint = EntityManager.HasComponent<Waypoint>(currentRaycastEntity);
                 bool hasTransportStop = EntityManager.HasComponent<Game.Routes.TransportStop>(currentRaycastEntity);
-                bool hasConnected = EntityManager.HasComponent<Game.Routes.Connected>(currentRaycastEntity);
+                bool hasRoute = EntityManager.HasComponent<Route>(currentRaycastEntity);
                 bool hasOwner = EntityManager.HasComponent<Owner>(currentRaycastEntity);
                 bool hasPrefabRef = EntityManager.HasComponent<PrefabRef>(currentRaycastEntity);
                 
-                m_Log.Info($"  Components: Building={hasBuilding}, Waypoint={hasWaypoint}, TransportStop={hasTransportStop}, Connected={hasConnected}, Owner={hasOwner}, PrefabRef={hasPrefabRef}");
+                m_Log.Info($"  Components: Building={hasBuilding}, Waypoint={hasWaypoint}, TransportStop={hasTransportStop}, Route={hasRoute}, Owner={hasOwner}, PrefabRef={hasPrefabRef}");
                 
                 // If it has PrefabRef, log the prefab info
                 if (hasPrefabRef)
@@ -150,9 +175,9 @@ namespace ManageResourceChains.Systems
             }
 
             // Check if it's a valid transport priority target
-            // It should be either a Building or a Waypoint with TransportStop
+            // It should be either a Building or a Waypoint (which should have TransportStop if it's a stop)
             bool isValid = EntityManager.HasComponent<Building>(currentRaycastEntity) || 
-                           (EntityManager.HasComponent<Waypoint>(currentRaycastEntity) && EntityManager.HasComponent<Game.Routes.TransportStop>(currentRaycastEntity));
+                           EntityManager.HasComponent<Waypoint>(currentRaycastEntity);
 
             if (!isValid)
             {
