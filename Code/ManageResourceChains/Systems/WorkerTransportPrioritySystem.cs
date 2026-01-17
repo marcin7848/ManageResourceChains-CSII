@@ -305,18 +305,15 @@ namespace ManageResourceChains.Systems
                                 if (destinationWaypoint != Entity.Null)
                                 {
                                     // Set up path: [boarding waypoint, destination waypoint]
-                                    // The AI checks path[elementIndex+1] to decide where to exit.
-                                    // When ShouldExitVehicle returns true with obsolete=true, the AI will:
-                                    // 1. Do pathOwner.m_ElementIndex += 2
-                                    // 2. Mark path as Obsolete  
-                                    // 3. Request new pathfinding from exit stop to target
+                                    // Only 2 elements! After CurrentVehicleBoarding does elementIndex += 2,
+                                    // ExitVehicle will check: elementIndex < path.Length → 2 < 2 = FALSE
+                                    // This forces ExitVehicle to use fallback behavior (vehicle position)
+                                    // instead of trying to navigate to a building entity.
                                     var pathElements = EntityManager.GetBuffer<PathElement>(residentEntity);
                                     pathElements.Clear();
-                                    pathElements.Add(new PathElement(boardingWaypoint, 0f));  // Index 0: Current position/boarding point
-                                    pathElements.Add(new PathElement(destinationWaypoint, 0f)); // Index 1: Where to exit the bus
-                                    
-                                    // DON'T add the final target here - let the AI request a proper path after exiting
-                                    // This prevents broken pathfinding with no lane information
+                                    pathElements.Add(new PathElement(boardingWaypoint, 0f));  // [0]: boarding point
+                                    pathElements.Add(new PathElement(destinationWaypoint, 0f)); // [1]: exit waypoint (checked by ShouldExitVehicle)
+                                    // DO NOT add element [2] - prevents ExitVehicle from using building as target!
                                     
                                     pathOwner.m_ElementIndex = 0;
                                 }
@@ -369,7 +366,7 @@ namespace ManageResourceChains.Systems
                         // Path structure while on vehicle:
                         // [0] = boarding waypoint (where we got on)
                         // [1] = destination waypoint (where to get off) - this is checked by ShouldExitVehicle
-                        // [2] = final target (where to walk after exiting) - needed for pathfinding after exit
+                        // [2] = next target (where to walk after exiting) - needed for pathfinding after exit
                         //
                         // DO NOT add vehicle to path - the native AI doesn't expect it there!
                         
@@ -393,8 +390,11 @@ namespace ManageResourceChains.Systems
                             pathElements.Add(new PathElement(destinationWaypoint, 0f));
                         }
                         
-                        // DON'T add final target - the native AI will mark path as Obsolete when exiting
-                        // and request proper pathfinding with all lane information from exit to destination
+                        // DO NOT add element [2]!
+                        // After CurrentVehicleBoarding does elementIndex += 2, elementIndex = 2
+                        // ExitVehicle checks: if (elementIndex < path.Length && !Obsolete)
+                        // With 2 elements: 2 < 2 = FALSE, so ExitVehicle uses fallback (vehicle position)
+                        // If we added the building as [2], ExitVehicle would use it as target = broken pathfinding!
                         
                         pathOwner.m_ElementIndex = 0;
                         pathOwner.m_State &= ~(PathFlags.Obsolete | PathFlags.Failed);
@@ -405,7 +405,7 @@ namespace ManageResourceChains.Systems
                         EntityManager.SetComponentData(residentEntity, resident);
                         EntityManager.SetComponentData(residentEntity, humanLane);
                         
-                        Mod.log.Info($"Worker {citizenEntity.Index} successfully boarded! Path: [{boardingWaypoint.Index}, {destinationWaypoint.Index}, {target.m_Target.Index}] in vehicle {currentVehicle.m_Vehicle.Index}");
+                        Mod.log.Info($"Worker {citizenEntity.Index} successfully boarded! Path: [{boardingWaypoint.Index}, {destinationWaypoint.Index}] (2 elements only, target={target.m_Target.Index}) in vehicle {currentVehicle.m_Vehicle.Index}");
                     }
                     else if (isEntering)
                     {
@@ -440,8 +440,7 @@ namespace ManageResourceChains.Systems
                                     pathElements.Clear();
                                     pathElements.Add(new PathElement(boardingWaypoint, 0f));
                                     pathElements.Add(new PathElement(destinationWaypoint, 0f));
-                                    
-                                    // DON'T add final target - let AI request proper pathfinding after exit
+                                    // DO NOT add element [2] - prevents ExitVehicle from using building as target!
                                     
                                     pathOwner.m_ElementIndex = 0;
                                     pathOwner.m_State |= PathFlags.Updated;
@@ -484,28 +483,102 @@ namespace ManageResourceChains.Systems
                 }
                 else if (forcedTrip.m_State == ForcedTripState.MovingToFinalTarget || forcedTrip.m_State == ForcedTripState.MovingToPriority)
                 {
-                    // Check if passenger has exited the vehicle
-                    if (!hasVehicle && !inVehicle && endReached)
+                    // CRITICAL: With 2-element path, native AI's CurrentVehicleBoarding does NOT mark path as Obsolete
+                    // (because obsolete = false when nextLane = Entity.Null).
+                    // We MUST manually mark the path as Obsolete BEFORE the passenger exits,
+                    // or they'll try to use the stale 2-element path after exiting.
+                    
+                    bool isDisembarking = (resident.m_Flags & ResidentFlags.Disembarking) != 0;
+                    
+                    if (isDisembarking && hasVehicle)
                     {
-                        // Successfully exited at a stop, now walking to final destination
-                        // Ensure target is set to final destination and path will be re-requested
-                        if (target.m_Target != forcedTrip.m_FinalTarget)
+                        // Still have CurrentVehicle but Disembarking flag set
+                        // This means CurrentVehicleBoarding has run and set Disembarking
+                        // Path is at elementIndex=2 (after += 2), but NOT marked Obsolete!
+                        
+                        // Mark path as Obsolete NOW so ExitVehicle and post-exit pathfinding work correctly
+                        pathOwner.m_State |= PathFlags.Obsolete;
+                        EntityManager.SetComponentData(residentEntity, pathOwner);
+                        
+                        Mod.log.Info($"Worker {citizenEntity.Index} DISEMBARKING detected - marked path Obsolete manually (native AI didn't do it). ElementIndex={pathOwner.m_ElementIndex}");
+                        
+                        continue; // Skip rest of processing this frame
+                    }
+                    
+                    // Check if passenger has exited the vehicle
+                    // We check !hasVehicle && !inVehicle to detect they are on foot
+                    if (!hasVehicle && !inVehicle)
+                    {
+                        var pathElements = EntityManager.GetBuffer<PathElement>(residentEntity);
+                        bool isObsolete = (pathOwner.m_State & PathFlags.Obsolete) != 0;
+                        bool isPending = (pathOwner.m_State & PathFlags.Pending) != 0;
+                        bool isUpdated = (pathOwner.m_State & PathFlags.Updated) != 0;
+                        bool isFailed = (pathOwner.m_State & PathFlags.Failed) != 0;
+                        bool disembarking = (resident.m_Flags & ResidentFlags.Disembarking) != 0;
+                        
+                        // CRITICAL: If elementIndex is at 2 or beyond, they've exited and are now pointing at element[2] (building entity)
+                        // This element has NO lane information and causes them to walk to edge of map!
+                        // We must IMMEDIATELY clear the path and request a new one.
+                        if (pathOwner.m_ElementIndex >= 2)
                         {
-                            target.m_Target = forcedTrip.m_FinalTarget;
-                            EntityManager.SetComponentData(residentEntity, target);
+                            // EMERGENCY: Immediately clear the path buffer to prevent using element[2]
+                            // Do this BEFORE checking isPending/isUpdated to ensure we never use the invalid path
+                            if (pathElements.Length > 0)
+                            {
+                                pathElements.Clear();
+                                pathOwner.m_ElementIndex = 0;
+                                pathOwner.m_State |= PathFlags.Obsolete;
+                                EntityManager.SetComponentData(residentEntity, pathOwner);
+                                Mod.log.Info($"Worker {citizenEntity.Index} EXITED vehicle - CLEARED path immediately to prevent edge-of-map walking!");
+                            }
+                            
+                            // Now request proper pathfinding if not already in progress
+                            if (!isPending && !isUpdated)
+                            {
+                                // Immediately end forced trip which will call PrepareWalkingSegment
+                                if (forcedTrip.m_State == ForcedTripState.MovingToFinalTarget)
+                                {
+                                    EndForcedTrip(residentEntity, forcedTrip.m_FinalTarget);
+                                }
+                                else
+                                {
+                                    PrepareWalkingSegment(residentEntity, target.m_Target);
+                                }
+                            }
+                            continue; // Skip rest of processing for this entity this frame
                         }
                         
-                        // If this was the final stop, end the forced trip
-                        if (forcedTrip.m_State == ForcedTripState.MovingToFinalTarget || 
-                            (pathOwner.m_State & PathFlags.Obsolete) != 0)
+                        // Regular exit detection logic
+                        // Path is considered "finished" if we are at the end of the buffer or buffer is empty
+                        bool pathAtEnd = pathOwner.m_ElementIndex >= pathElements.Length;
+
+                        // We need a reset if:
+                        // 1. Native AI says we reached the end of current lane/path (endReached)
+                        // 2. Native AI marked the path as Obsolete or Failed
+                        // 3. Mod/Native AI says we are Disembarking
+                        // 4. We are at the end of the path buffer
+                        // AND no pathfind is currently in progress (Pending or Updated)
+                        bool needsPathReset = (endReached || isObsolete || isFailed || disembarking || pathAtEnd) && !isPending && !isUpdated;
+
+                        if (needsPathReset)
                         {
-                            EndForcedTrip(residentEntity, forcedTrip.m_FinalTarget);
-                        }
-                        else
-                        {
-                            // Moving to another priority stop
-                            forcedTrip.m_State = ForcedTripState.MovingToPriority;
-                            EntityManager.SetComponentData(residentEntity, forcedTrip);
+                            // If this was the final stop, end the forced trip
+                            if (forcedTrip.m_State == ForcedTripState.MovingToFinalTarget)
+                            {
+                                Mod.log.Info($"Worker {citizenEntity.Index} needs walking reset to FINAL workplace {forcedTrip.m_FinalTarget.Index}. Reason: EndReached={endReached}, Obsolete={isObsolete}, Failed={isFailed}, Disembarking={disembarking}, AtEnd={pathAtEnd}");
+                                EndForcedTrip(residentEntity, forcedTrip.m_FinalTarget);
+                            }
+                            else if (forcedTrip.m_NextPriorityIndex > 0)
+                            {
+                                // Moving to another priority stop (and we've already completed at least one leg)
+                                forcedTrip.m_State = ForcedTripState.MovingToPriority;
+                                EntityManager.SetComponentData(residentEntity, forcedTrip);
+                                
+                                Mod.log.Info($"Worker {citizenEntity.Index} needs walking reset to NEXT priority {target.m_Target.Index}. Reason: EndReached={endReached}, Obsolete={isObsolete}, Failed={isFailed}, Disembarking={disembarking}, AtEnd={pathAtEnd}");
+                                
+                                // target.m_Target was already set to nextTarget when boarding
+                                PrepareWalkingSegment(residentEntity, target.m_Target);
+                            }
                         }
                     }
                 }
@@ -682,26 +755,7 @@ namespace ManageResourceChains.Systems
 
             if (firstTarget != Entity.Null)
             {
-                Target target = EntityManager.GetComponentData<Target>(residentEntity);
-                target.m_Target = firstTarget;
-                EntityManager.SetComponentData(residentEntity, target);
-
-                PathOwner pathOwner = EntityManager.GetComponentData<PathOwner>(residentEntity);
-                pathOwner.m_State |= PathFlags.Obsolete;
-                EntityManager.SetComponentData(residentEntity, pathOwner);
-
-                // Reset flags
-                if (EntityManager.HasComponent<HumanCurrentLane>(residentEntity))
-                {
-                    var humanLane = EntityManager.GetComponentData<HumanCurrentLane>(residentEntity);
-                    humanLane.m_Flags &= ~(CreatureLaneFlags.EndReached | CreatureLaneFlags.EndOfPath | CreatureLaneFlags.Transport);
-                    humanLane.m_QueueEntity = Entity.Null;
-                    EntityManager.SetComponentData(residentEntity, humanLane);
-                }
-
-                var resident = EntityManager.GetComponentData<Game.Creatures.Resident>(residentEntity);
-                resident.m_Flags &= ~(ResidentFlags.Arrived | ResidentFlags.Hangaround | ResidentFlags.WaitingTransport | ResidentFlags.CannotIgnore);
-                EntityManager.SetComponentData(residentEntity, resident);
+                PrepareWalkingSegment(residentEntity, firstTarget);
 
                 EntityManager.AddComponentData(residentEntity, new ForcedPriorityTrip
                 {
@@ -716,32 +770,46 @@ namespace ManageResourceChains.Systems
             }
         }
 
-        private void EndForcedTrip(Entity residentEntity, Entity finalTarget)
+        private void PrepareWalkingSegment(Entity residentEntity, Entity targetEntity)
         {
             Target target = EntityManager.GetComponentData<Target>(residentEntity);
-            target.m_Target = finalTarget;
+            target.m_Target = targetEntity;
             EntityManager.SetComponentData(residentEntity, target);
 
             PathOwner pathOwner = EntityManager.GetComponentData<PathOwner>(residentEntity);
-            pathOwner.m_State |= PathFlags.Obsolete;
+            // Clear Failed and Pending to ensure a fresh search starts
+            pathOwner.m_State &= ~(PathFlags.Failed | PathFlags.Pending);
+            pathOwner.m_State |= PathFlags.Obsolete | PathFlags.Updated;
+            pathOwner.m_ElementIndex = 0;
             EntityManager.SetComponentData(residentEntity, pathOwner);
-
-            // Reset arrival and waiting flags
+            
+            if (EntityManager.HasBuffer<PathElement>(residentEntity))
+            {
+                EntityManager.GetBuffer<PathElement>(residentEntity).Clear();
+            }
+            
             if (EntityManager.HasComponent<HumanCurrentLane>(residentEntity))
             {
                 var humanLane = EntityManager.GetComponentData<HumanCurrentLane>(residentEntity);
-                humanLane.m_Flags &= ~(CreatureLaneFlags.EndReached | CreatureLaneFlags.EndOfPath | CreatureLaneFlags.Transport);
+                // Clear all pathing/arrival flags and force FindLane
+                humanLane.m_Flags &= ~(CreatureLaneFlags.EndReached | CreatureLaneFlags.EndOfPath | CreatureLaneFlags.Transport | CreatureLaneFlags.WaitPosition | CreatureLaneFlags.Stuck | CreatureLaneFlags.Obsolete);
+                humanLane.m_Flags |= CreatureLaneFlags.FindLane;
                 humanLane.m_QueueEntity = Entity.Null;
                 EntityManager.SetComponentData(residentEntity, humanLane);
             }
-
+            
             var resident = EntityManager.GetComponentData<Game.Creatures.Resident>(residentEntity);
-            resident.m_Flags &= ~(ResidentFlags.Arrived | ResidentFlags.Hangaround | ResidentFlags.WaitingTransport | ResidentFlags.CannotIgnore);
+            // Clear all behavioral and state flags that might interfere with clean pathfinding
+            resident.m_Flags &= ~(ResidentFlags.Arrived | ResidentFlags.Hangaround | ResidentFlags.WaitingTransport | ResidentFlags.CannotIgnore | ResidentFlags.Disembarking | ResidentFlags.NoLateDeparture);
             EntityManager.SetComponentData(residentEntity, resident);
+        }
 
+        private void EndForcedTrip(Entity residentEntity, Entity finalTarget)
+        {
+            PrepareWalkingSegment(residentEntity, finalTarget);
             EntityManager.RemoveComponent<ForcedPriorityTrip>(residentEntity);
             
-            Mod.log.Info($"Forced trip ended. Redirecting worker to final destination {finalTarget.Index}");
+            Mod.log.Info($"Forced trip ended. Redirecting worker {residentEntity.Index} to final destination {finalTarget.Index}");
         }
 
         private Entity GetHomeEntity(Entity citizen)
