@@ -146,3 +146,215 @@ Resource transport in CS2 is managed via `StorageTransferRequest` elements.
 
 ### Conclusion
 Both scenarios are definitely possible. The implementation would involve creating a new system that hooks into the **Pathfind Setup** phase to modify the targets of citizens and resources before the actual pathfinding begins. This ensures that the game "thinks" it's just doing a normal trip to the intermediate station you've chosen.
+
+---
+
+## 7. Implementation: Worker Transport Forcing (COMPLETED - January 2026)
+
+### Overview
+Successfully implemented a hard-forcing system that makes workers use specific bus stops when commuting to work. The implementation uses a multi-stage trip state machine combined with careful synchronization with the game's native AI systems.
+
+### System Architecture
+
+#### WorkerTransportPrioritySystem
+Located in: `Systems/WorkerTransportPrioritySystem.cs`
+
+This system manages the entire lifecycle of forced transport trips for workers.
+
+**Key Components:**
+- `ForcedPriorityTrip` - Custom ECS component attached to workers to track forced trip state
+- Trip states: `MovingToPriority`, `WaitingAtPriority`, `MovingToFinalTarget`
+- Update interval: Every 16 frames (~0.27 seconds at 60fps)
+
+### Implementation Stages
+
+#### Stage 1: Trip Interception
+When a worker starts going to work:
+1. System detects `TravelPurpose.m_Purpose == Purpose.GoingToWork`
+2. Checks if there's a matching `ResourceChainRule` with transport priorities
+3. If yes, redirects the worker's `Target.m_Target` from workplace to the first priority stop
+4. Attaches `ForcedPriorityTrip` component with:
+   - `m_FinalTarget` = actual workplace
+   - `m_CurrentResolvedWaypoint` = waypoint entity to wait at
+   - `m_CurrentResolvedStop` = stop entity where bus arrives
+   - `m_State` = `MovingToPriority`
+
+#### Stage 2: Waiting at Stop
+When worker reaches the bus stop:
+1. Detects `EndReached` flag on `HumanCurrentLane`
+2. Transitions to `WaitingAtPriority` state
+3. Sets up waiting behavior:
+   - `ResidentFlags.WaitingTransport` - marks as waiting for transport
+   - `ResidentFlags.CannotIgnore` - prevents AI from deciding to walk instead
+   - `CreatureLaneFlags.Transport | EndReached` - proper lane state
+4. Resolves the stop entity to find its waypoint and connected routes
+5. Worker naturally queues at the stop using native AI positioning
+
+**Critical Implementation Detail:**
+- Do NOT set `WaitingPosition` flag or manually override `m_CurvePosition`
+- Let the native AI's `SetQueuePosition` handle queue distribution naturally
+- This prevents passengers from stacking in one spot
+
+#### Stage 3: Boarding Detection
+System detects boarding through multiple signals:
+1. `CurrentVehicle` component is added by native AI
+2. `BoardingVehicle` component exists on vehicle
+3. `ResidentFlags.WaitingTransport` flag still set (entering phase)
+4. Transitions from entering to `Ready` when `CreatureVehicleFlags.Ready` is set
+
+When fully boarded (`finishedEntering = true`):
+1. Clear waiting flags: `WaitingTransport`, `NoLateDeparture`
+2. Keep `CannotIgnore` flag to prevent early exit
+3. Set `humanLane.m_Lane` to the vehicle entity
+4. Clear arrival flags: `EndReached`, `EndOfPath`
+
+#### Stage 4: Path Setup for Bus Ride
+**CRITICAL: 2-Element Path Structure**
+
+The path buffer is set up with EXACTLY 2 elements:
+```
+[0] = boarding_waypoint (where worker got on)
+[1] = destination_waypoint (where to exit)
+```
+
+**Why only 2 elements?**
+When the native AI's `CurrentVehicleBoarding` decides the passenger should exit:
+1. It does `pathOwner.m_ElementIndex += 2` (advances by 2)
+2. Then `ExitVehicle` checks: `if (elementIndex < path.Length && !Obsolete)`
+3. With 2 elements: `2 < 2` = FALSE
+4. `ExitVehicle` uses **fallback behavior** (exits at vehicle position)
+5. If we added element [2], `ExitVehicle` would try to navigate to it directly, causing edge-of-map walking!
+
+**Destination Waypoint Selection:**
+Uses `FindDestinationWaypointOnLine()` to find the waypoint on the bus line that is:
+- On the same route as the boarding waypoint
+- Closest to the final target (within 500m)
+- If no suitable waypoint found, uses next waypoint on line
+
+#### Stage 5: Riding the Bus
+While on the bus:
+1. `ResidentFlags.CannotIgnore` prevents passenger from deciding to exit early
+2. Native AI's `CurrentVehicleBoarding` checks each stop using `ShouldExitVehicle()`
+3. `ShouldExitVehicle` compares current stop's waypoint with `path[elementIndex + 1]`
+4. When bus reaches destination waypoint, `Disembarking` flag is set
+5. `elementIndex` is incremented by 2 (now equals 2)
+
+#### Stage 6: Exit Detection and Cleanup
+**Two-Phase Exit Detection:**
+
+**Phase 1: Disembarking Detection (Still in Vehicle)**
+When `Disembarking` flag is set AND `CurrentVehicle` component still exists:
+```csharp
+// Clear path buffer immediately to force fallback behavior
+pathElements.Clear();
+pathOwner.m_ElementIndex = 0;
+pathOwner.m_State |= PathFlags.Obsolete;
+```
+
+**Phase 2: Post-Exit Cleanup (After Leaving Vehicle)**
+When `CurrentVehicle` component is removed (passenger is on foot):
+```csharp
+// 1. Clear path buffer
+pathElements.Clear();
+
+// 2. Reset path state
+pathOwner.m_ElementIndex = 0;
+pathOwner.m_State |= PathFlags.Obsolete;
+pathOwner.m_State &= ~(PathFlags.Updated | PathFlags.Pending | PathFlags.Failed);
+
+// 3. CRITICAL: Reset HumanCurrentLane with FindLane flag
+humanLane.m_Lane = Entity.Null; // Clear vehicle reference
+humanLane.m_Flags = CreatureLaneFlags.FindLane; // ONLY FindLane!
+humanLane.m_CurvePosition = default;
+
+// 4. Clear resident flags
+resident.m_Flags &= ~(ResidentFlags.Disembarking | ResidentFlags.WaitingTransport | ResidentFlags.CannotIgnore);
+```
+
+**Why `CreatureLaneFlags.FindLane` is Critical:**
+- Without this flag, the passenger has no valid lane information after exiting
+- The native AI would attempt to walk in a straight line to the target
+- This caused the "walking to edge of map" bug
+- `FindLane` tells the native AI: "Find a valid pedestrian lane before attempting to move"
+
+#### Stage 7: Final Pathfinding
+After cleanup, request new pathfinding via `PrepareWalkingSegment()`:
+```csharp
+// Set target to final destination
+target.m_Target = finalTarget;
+
+// Mark path as Obsolete | Updated to trigger pathfinding
+pathOwner.m_State |= PathFlags.Obsolete | PathFlags.Updated;
+pathOwner.m_ElementIndex = 0;
+
+// Clear path buffer
+pathElements.Clear();
+
+// Force lane finding
+humanLane.m_Lane = Entity.Null;
+humanLane.m_Flags = CreatureLaneFlags.FindLane;
+
+// Clear behavioral flags
+resident.m_Flags &= ~(ResidentFlags.Arrived | ResidentFlags.WaitingTransport | ResidentFlags.CannotIgnore | ResidentFlags.Disembarking);
+```
+
+The native pathfinding system then creates a proper pedestrian path from the current position to the final destination.
+
+### Key Lessons Learned
+
+#### 1. Path Structure is Critical
+- **2-element path only** during transport prevents `ExitVehicle` from using invalid building entities
+- After `elementIndex += 2`, condition `2 < 2` forces fallback behavior
+- Adding element [2] causes navigation directly to building = edge-of-map walking
+
+#### 2. Lane State After Exit
+- Must clear `HumanCurrentLane.m_Lane` to `Entity.Null`
+- Must set ONLY `CreatureLaneFlags.FindLane` flag
+- Clear all other flags to ensure clean state
+- Without `FindLane`, passenger walks in straight line
+
+#### 3. Timing is Everything
+- Clear path when `Disembarking` is detected (still in vehicle)
+- Additional cleanup when `CurrentVehicle` is removed (on foot)
+- Two-phase approach prevents race conditions
+
+#### 4. Natural Queuing
+- Let native AI handle queue positioning at stops
+- Do NOT set `WaitingPosition` flag manually
+- Do NOT override `m_CurvePosition` manually
+- Native `SetQueuePosition` distributes passengers naturally
+
+#### 5. Flag Management
+- `CannotIgnore` while in vehicle prevents early exit
+- Clear `WaitingTransport` after boarding completes
+- Clear `Disembarking` after exit cleanup
+- Proper flag cleanup prevents state conflicts
+
+### System Performance
+- Update interval: 16 frames (~0.27s at 60fps)
+- Minimal performance impact due to targeted queries
+- Only processes workers with `ForcedPriorityTrip` component
+- Native AI handles all animation and physics
+
+### Result
+Workers successfully:
+1. Walk to specified bus stop
+2. Wait naturally in queue
+3. Board the bus
+4. Ride to destination stop
+5. Exit at correct location
+6. Walk properly to workplace using pedestrian lanes
+7. No stacking, no teleporting, no edge-of-map walking
+
+### Files Modified
+- `Systems/WorkerTransportPrioritySystem.cs` - Main implementation
+- `Systems/TransportPriorityCostSystem.cs` - Soft forcing (cost modification)
+- `Mod.cs` - System registration
+- `TransportPriority_Attempts.md` - Development documentation
+
+### Technical Notes
+- Uses ECS component queries for performance
+- Synchronizes with native `ResidentAISystem` execution
+- Respects native AI animation states
+- Compatible with all public transport types that use waypoints
+- Extensible to multiple stops per trip (sequential forcing)
