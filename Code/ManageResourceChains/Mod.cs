@@ -77,11 +77,6 @@ namespace ManageResourceChains
                 log.Info("Registering TransportPriorityCostSystem...");
                 updateSystem.UpdateAt<TransportPriorityCostSystem>(SystemUpdatePhase.GameSimulation);
                 log.Info("TransportPriorityCostSystem registered!");
-
-                // Register worker transport priority system for hard forcing
-                log.Info("Registering WorkerTransportPrioritySystem...");
-                updateSystem.UpdateBefore<WorkerTransportPrioritySystem, Game.Simulation.ResidentAISystem>(SystemUpdatePhase.GameSimulation);
-                log.Info("WorkerTransportPrioritySystem registered!");
             }
             catch (System.Exception ex)
             {
