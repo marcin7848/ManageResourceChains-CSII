@@ -104,25 +104,144 @@ The `ShouldExitVehicle` function returns true when:
 - DO NOT add vehicle entity to path - the native AI doesn't expect it there!
 
 #### Issue 3: Broken pathfinding after exiting bus
-**Root Cause**: After exiting, `pathOwner.m_ElementIndex += 2` advances the index to point at element `[2]`. The native pathfinder creates COMPLETE paths with all lane information (pedestrian paths, crosswalks, etc), then `RouteUtils.StripTransportSegments` removes the middle portion representing the vehicle ride, leaving: `[path_to_stop, boarding_waypoint, exit_waypoint, path_from_stop]`.
-
-Our manual path `[boarding_waypoint, exit_waypoint, final_target]` only had waypoint entities without lane information. When `elementIndex` advanced to `[2]`, the passenger tried to walk directly to the building entity with no path guidance, causing them to walk across roads randomly.
+**Root Cause**: After exiting, `pathOwner.m_ElementIndex += 2` advances the index to point at element `[2]`. The native pathfinder creates COMPLETE paths with all lane information (pedestrian paths, crosswalks, etc). When we were manually injecting a 2-stop path `[boarding_waypoint, destination_waypoint]` and then clearing it or letting it become obsolete, there was a risk that the worker would attempt to walk to the next destination (another stop or the workplace) without a valid lane-based path. This caused them to walk in straight lines, crossing roads randomly.
 
 **Fix**: 
-- **DON'T add the final target to the path at all**
-- Use only `[boarding_waypoint, exit_waypoint]` as the path
-- When `ShouldExitVehicle` is called with a 2-element path:
-  - `nextLane = path[elementIndex + 2]` will be `Entity.Null` (out of bounds)
-  - This causes `obsolete = false` by default in `ShouldExitVehicle`
-  - BUT if the route doesn't match, it will set `obsolete = true` anyway
-- When path is marked `Obsolete`, the native AI will request a PROPER pathfinding with all lane information from the exit stop to `target.m_Target`
-- After exit handling in `MovingToFinalTarget` state: ensure `target.m_Target` is correctly set to final destination and call `EndForcedTrip` to let native pathfinding take over
+- **Centralized Walking Initialization**: Implemented `PrepareWalkingSegment(residentEntity, targetEntity)`.
+- **Force Re-pathfinding**: This helper sets `PathFlags.Obsolete | PathFlags.Updated`, resets `m_ElementIndex` to 0, and clears the `PathElement` buffer.
+- **Find Lane Flag**: Crucially, it also sets the `CreatureLaneFlags.FindLane` flag. This forces the native `ResidentAISystem` to find a valid starting lane (sidewalk/stop) before requesting a new path.
+- **State Cleanup**: It also clears stale flags like `EndReached`, `EndOfPath`, `WaitingTransport`, and `Disembarking`.
+- **Applied to Transitions**: This helper is now called whenever the worker switches to a walking segment:
+  1. At the very start of a forced trip.
+  2. After exiting a vehicle at a priority stop to walk to the next stop.
+  3. After exiting the final vehicle to walk to the workplace.
 
-**Key Learning**: Never manually add non-lane entities to paths - the native pathfinder must create complete paths with all lane segments. For multi-stop transport trips, provide only waypoints and let the path be marked Obsolete for re-pathfinding after each leg.
+### Latest Fix (January 2026) - Preventing Pathfinding Reset Loops
+#### Issue: Passengers walking in straight lines (crossing roads randomly) after exiting bus
+**Root Cause**: The previous logic for resetting the walking segment (`needsPathReset`) was too aggressive. It triggered a reset every frame if `PathFlags.Obsolete` or `ResidentFlags.Disembarking` was true. Because the game's native pathfinder may take several frames to process a request (during which `Obsolete` might stay true before `Pending` is fully set), the mod was repeatedly clearing the path buffer and requesting updates every single frame. This created an infinite loop where a valid, lane-based path could never be established, forcing the worker into fallback "air" navigation (straight-line walking).
+
+**Fix**:
+- **Refined Reset Condition**: Updated `needsPathReset` to explicitly ignore workers if they already have `PathFlags.Pending` or `PathFlags.Updated` set. This ensures that once a path request is made, the mod waits for the native pathfinder to respond before attempting another reset.
+- **Improved Path Structure**: Added the final target as a 3rd element in the `PathElement` buffer during the transport leg. This ensures that the native AI's `ShouldExitVehicle` check (which looks at `elementIndex + 2`) has a valid target to inspect, and provides a clear starting point for the subsequent walking pathfinding.
+- **Robust Flag Cleanup**: Maintained the deep cleaning of behavioral and arrival flags during the transition to ensure a clean hand-off to the pedestrian AI.
+
+**Key Learning**: When interacting with the game's asynchronous pathfinding system, you must implement a "request and wait" pattern. Repeatedly forcing the `Obsolete` flag or clearing buffers every frame will starve the pathfinder and lead to broken navigation behavior. Always respect the `Pending` and `Updated` states.
+
+**CRITICAL**: The 3-element path structure `[boarding_waypoint, exit_waypoint, final_target]` is REQUIRED because:
+- If path only has 2 elements, `CurrentVehicleBoarding` sets `nextLane = Entity.Null` (element [2] doesn't exist)
+- `ShouldExitVehicle` checks `if (nextLane != Entity.Null && ...)` - this is SKIPPED when nextLane is null
+- Result: `obsolete` stays `false`, path is NOT marked Obsolete
+- `elementIndex` advances to 2 (pointing at nothing), passenger has no valid pathfinding guidance
+- Passenger walks in straight lines, crossing roads randomly!
+- With 3 elements, `nextLane = final_target`, and since its owner differs from the stop's owner, `obsolete = true`
+- Path is properly marked Obsolete, and `PrepareWalkingSegment` clears it and requests new proper pathfinding
 
 **Key Learning**: The native AI's path structure for public transport:
 - **When walking to stop**: `TransportStopReached` uses `path[elementIndex]` as current waypoint and `path[elementIndex + 1]` as next waypoint
 - **When in vehicle**: `CurrentVehicleBoarding` uses `path[elementIndex + 1]` as exit check and `path[elementIndex + 2]` for post-exit pathfinding
 - **After exit**: `elementIndex += 2` to skip transport segment and continue walking
+
+### Final Fix (January 2026) - Emergency Path Clearing on Exit
+
+#### Issue: Passengers walking to edge of map and disappearing after exiting bus
+**Root Cause**: Even with the emergency detection calling `PrepareWalkingSegment`, there was a race condition. When the native AI's `CurrentVehicleBoarding` does `pathOwner.m_ElementIndex += 2`, the passenger is now pointing at path element [2] (the building entity with NO lane information). Before `PrepareWalkingSegment` could complete its work (clearing path, requesting new pathfinding), the passenger was trying to walk using this invalid path element for 1-2 frames, causing them to walk in a straight line to the edge of the map.
+
+**Fix**: **Immediately clear the path buffer** as soon as we detect `elementIndex >= 2`:
+1. Clear the entire path buffer (`pathElements.Clear()`)
+2. Reset `elementIndex` to 0
+3. Mark path as `Obsolete`
+4. Save the pathOwner component
+5. **THEN** check if we need to call `PrepareWalkingSegment` (only if not already `Pending` or `Updated`)
+6. Skip rest of processing with `continue`
+
+This ensures the invalid path element [2] is removed **before** the passenger can try to use it, preventing the edge-of-map walking behavior completely.
+
+**Key Insight**: The fix must happen in the **correct order**:
+1. First: Clear the path (prevent using invalid element)
+2. Second: Request new path (only if needed)
+3. Third: Continue (skip rest of logic this frame)
+
+This atomic operation prevents any window where the passenger could use the invalid building entity as a navigation target.
+
+### Critical Timing Fix (January 2026) - Detect Disembarking BEFORE ExitVehicle
+
+#### Issue: Path clearing was happening too late
+**Root Cause Discovery**: By analyzing the decompiled `ExitVehicle` function in `ResidentAISystem.cs`, I found that:
+
+1. `CurrentVehicleBoarding` sets `Disembarking` flag and does `elementIndex += 2`
+2. `ExitVehicle` runs WHILE the passenger still has `CurrentVehicle` component
+3. `ExitVehicle` uses `path[elementIndex]` to determine exit target position
+4. If `elementIndex=2` and `path[2]` is a building entity, it uses that building's position!
+5. THEN the `CurrentVehicle` component is removed
+6. Our previous detection (`!hasVehicle && !inVehicle`) was running AFTER all this
+
+The native `ExitVehicle` function code:
+```csharp
+if (pathOwner.m_ElementIndex < path.Length && (pathOwner.m_State & PathFlags.Obsolete) == 0)
+{
+    PathElement pathElement = path[pathOwner.m_ElementIndex];
+    // Uses pathElement.m_Target to get target position!
+    // Calls FixPathStart with this element
+}
+```
+
+**Fix**: Detect `Disembarking` flag while passenger STILL HAS `CurrentVehicle`:
+```csharp
+if (isDisembarking && hasVehicle)
+{
+    // Still have CurrentVehicle but Disembarking flag set
+    // Native AI is about to run ExitVehicle - clear path NOW!
+    pathElements.Clear();
+    pathOwner.m_ElementIndex = 0;
+    pathOwner.m_State |= PathFlags.Obsolete;
+    EntityManager.SetComponentData(residentEntity, pathOwner);
+    continue;
+}
+```
+
+This ensures the path is cleared BEFORE `ExitVehicle` can use our invalid path elements. When `ExitVehicle` sees an empty path or `PathFlags.Obsolete`, it uses fallback behavior instead of trying to navigate to our building entity.
+
+**Key Learning**: The native AI's exit sequence is:
+1. `CurrentVehicleBoarding` - decides to exit, sets `Disembarking`, `elementIndex += 2`
+2. `ExitVehicle` - actually exits, uses path (STILL has `CurrentVehicle`!)
+3. After exit - `CurrentVehicle` component removed
+
+Detection must happen at step 1-2, not step 3!
+
+### FINAL SOLUTION: 2-Element Path Only (January 2026)
+
+#### Issue: Even with early detection, ExitVehicle still used invalid path element
+**Root Cause Discovery**: By analyzing the execution flow more carefully:
+1. `CurrentVehicleBoarding` and `ExitVehicle` are called IN THE SAME FRAME, in sequence
+2. Our mod system runs in a DIFFERENT phase of the frame, AFTER the native AI has already executed
+3. So even if we detect `Disembarking` flag, `ExitVehicle` has ALREADY run and used the invalid path
+
+**The Real Fix**: Don't put the building entity in the path AT ALL!
+
+Instead of a 3-element path `[boarding_waypoint, exit_waypoint, building]`, use only 2 elements: `[boarding_waypoint, exit_waypoint]`.
+
+Here's why this works:
+1. `CurrentVehicleBoarding` does `elementIndex += 2`, so `elementIndex = 2`
+2. `ExitVehicle` checks: `if (elementIndex < path.Length && !Obsolete)`
+3. With 2 elements: `2 < 2` = FALSE
+4. `ExitVehicle` uses FALLBACK behavior (vehicle position) instead of trying to navigate to our building!
+5. Path is properly marked Obsolete by `CurrentVehicleBoarding`
+6. After the native AI is done, our code detects the exit and calls `PrepareWalkingSegment` for proper pathfinding
+
+**Key Insight**: The goal is to make the condition `elementIndex < path.Length` evaluate to FALSE, so `ExitVehicle` never tries to use our path elements as navigation targets.
+
+**Path structure during transport:**
+```
+[0] = boarding_waypoint (where we got on)
+[1] = exit_waypoint (where to get off) - checked by ShouldExitVehicle
+DO NOT ADD [2]!
+```
+
+This ensures:
+- `ShouldExitVehicle` works correctly (only needs elements 0 and 1)
+- `ExitVehicle` uses fallback (because elementIndex >= path.Length after +2)
+- No building entity in path = no walking to edge of map!
+
+
 
 
