@@ -105,7 +105,7 @@ namespace ManageResourceChains.Systems
         /// <summary>
         /// Generate a unique key for an entity configuration
         /// </summary>
-        private static string GetConfigKey(int entityId, Data.EntityType type)
+        public static string GetConfigKey(int entityId, Data.EntityType type)
         {
             return $"{entityId}_{type}";
         }

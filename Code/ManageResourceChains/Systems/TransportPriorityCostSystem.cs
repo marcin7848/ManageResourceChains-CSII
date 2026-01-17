@@ -17,12 +17,18 @@ namespace ManageResourceChains.Systems
         
         // Track which entities we've modified so we can restore them
         private Dictionary<Entity, TransportStopModification> _modifiedStops = new Dictionary<Entity, TransportStopModification>();
+        private Dictionary<Entity, TransportLineModification> _modifiedLines = new Dictionary<Entity, TransportLineModification>();
         
         // Store original values for restoration
         private struct TransportStopModification
         {
             public float OriginalComfortFactor;
             public float OriginalLoadingFactor;
+        }
+
+        private struct TransportLineModification
+        {
+            public ushort OriginalTicketPrice;
         }
         
         public override int GetUpdateInterval(SystemUpdatePhase phase)
@@ -50,13 +56,13 @@ namespace ManageResourceChains.Systems
             // Collect all priority entities that should be modified
             var priorityEntities = new HashSet<int>();
             var priorityRules = new Dictionary<int, List<ResourceChainRule>>(); // Entity -> Rules that affect it
+            var priorityLines = new HashSet<Entity>();
             
             foreach (var config in allConfigs.Values)
             {
                 foreach (var rule in config.Rules)
                 {
                     // Only process rules that have transport priorities and are for workers
-                    // (Resources would need cargo stations which work differently)
                     if (rule.TransportPriorities != null && rule.TransportPriorities.Count > 0 
                         && rule.TransportType == Data.TransportType.Workers)
                     {
@@ -68,6 +74,17 @@ namespace ManageResourceChains.Systems
                                 priorityRules[priority.StationEntity] = new List<ResourceChainRule>();
                             
                             priorityRules[priority.StationEntity].Add(rule);
+
+                            // Find the line this stop belongs to
+                            Entity stopEntity = new Entity { Index = priority.StationEntity, Version = 1 };
+                            if (EntityManager.Exists(stopEntity) && EntityManager.HasComponent<Game.Common.Owner>(stopEntity))
+                            {
+                                Entity lineEntity = EntityManager.GetComponentData<Game.Common.Owner>(stopEntity).m_Owner;
+                                if (EntityManager.HasComponent<TransportLine>(lineEntity))
+                                {
+                                    priorityLines.Add(lineEntity);
+                                }
+                            }
                         }
                     }
                 }
@@ -75,9 +92,40 @@ namespace ManageResourceChains.Systems
             
             // Apply modifications to priority entities
             ApplyPriorityModifications(priorityEntities, priorityRules);
+            ApplyLineModifications(priorityLines);
             
             // Restore entities that are no longer priorities
-            RestoreNonPriorityEntities(priorityEntities);
+            RestoreNonPriorityEntities(priorityEntities, priorityLines);
+        }
+
+        private void ApplyLineModifications(HashSet<Entity> priorityLines)
+        {
+            foreach (var lineEntity in priorityLines)
+            {
+                if (!EntityManager.Exists(lineEntity) || !EntityManager.HasComponent<TransportLine>(lineEntity))
+                    continue;
+
+                var line = EntityManager.GetComponentData<TransportLine>(lineEntity);
+
+                // Store original values if first time
+                if (!_modifiedLines.ContainsKey(lineEntity))
+                {
+                    _modifiedLines[lineEntity] = new TransportLineModification
+                    {
+                        OriginalTicketPrice = line.m_TicketPrice
+                    };
+                    Mod.log.Info($"Storing original ticket price for line {lineEntity.Index}: {line.m_TicketPrice}");
+                }
+
+                // Lower ticket price to make it more attractive (e.g., set to 0 or half)
+                // For prioritized transport, we'll set it to 0
+                if (line.m_TicketPrice > 0)
+                {
+                    line.m_TicketPrice = 0;
+                    EntityManager.SetComponentData(lineEntity, line);
+                    Mod.log.Debug($"Applied priority to line {lineEntity.Index}: TicketPrice=0");
+                }
+            }
         }
         
         private void ApplyPriorityModifications(HashSet<int> priorityEntities, Dictionary<int, List<ResourceChainRule>> priorityRules)
@@ -134,21 +182,21 @@ namespace ManageResourceChains.Systems
             }
         }
         
-        private void RestoreNonPriorityEntities(HashSet<int> currentPriorities)
+        private void RestoreNonPriorityEntities(HashSet<int> currentPriorities, HashSet<Entity> currentLines)
         {
             // Find entities that were modified but are no longer priorities
-            var toRestore = new List<Entity>();
+            var stopsToRestore = new List<Entity>();
             
             foreach (var kvp in _modifiedStops)
             {
                 if (!currentPriorities.Contains(kvp.Key.Index))
                 {
-                    toRestore.Add(kvp.Key);
+                    stopsToRestore.Add(kvp.Key);
                 }
             }
             
-            // Restore original values
-            foreach (var entity in toRestore)
+            // Restore original values for stops
+            foreach (var entity in stopsToRestore)
             {
                 if (EntityManager.Exists(entity) && EntityManager.HasComponent<TransportStop>(entity))
                 {
@@ -163,6 +211,33 @@ namespace ManageResourceChains.Systems
                 }
                 
                 _modifiedStops.Remove(entity);
+            }
+
+            // Find lines to restore
+            var linesToRestore = new List<Entity>();
+            foreach (var kvp in _modifiedLines)
+            {
+                if (!currentLines.Contains(kvp.Key))
+                {
+                    linesToRestore.Add(kvp.Key);
+                }
+            }
+
+            // Restore original values for lines
+            foreach (var entity in linesToRestore)
+            {
+                if (EntityManager.Exists(entity) && EntityManager.HasComponent<TransportLine>(entity))
+                {
+                    var line = EntityManager.GetComponentData<TransportLine>(entity);
+                    var original = _modifiedLines[entity];
+
+                    line.m_TicketPrice = original.OriginalTicketPrice;
+
+                    EntityManager.SetComponentData(entity, line);
+                    Mod.log.Info($"Restored original ticket price for line {entity.Index}");
+                }
+
+                _modifiedLines.Remove(entity);
             }
         }
     }
