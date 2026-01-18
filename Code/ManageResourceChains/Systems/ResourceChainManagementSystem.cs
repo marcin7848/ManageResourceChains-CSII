@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using Colossal.UI.Binding;
+using Game.Common;
 using Game.UI;
 using Game.Tools;
 using Unity.Entities;
@@ -573,7 +574,6 @@ namespace ManageResourceChains.Systems
         #region District Picker Tool
 
         /// <summary>
-        /// <summary>
         /// Check if district picker is currently active
         /// </summary>
         public bool IsDistrictPickerActive()
@@ -805,56 +805,109 @@ namespace ManageResourceChains.Systems
         {
             try
             {
-                // Check for specific stop component types (for waypoints/stops)
+                // If it's a waypoint, check the connected stop's components or owner building
+                if (EntityManager.HasComponent<Game.Routes.Waypoint>(entity))
+                {
+                    // Check if waypoint has a Connected component (links to the actual stop)
+                    if (EntityManager.HasComponent<Game.Routes.Connected>(entity))
+                    {
+                        var connected = EntityManager.GetComponentData<Game.Routes.Connected>(entity);
+                        Entity stopEntity = connected.m_Connected;
+                        
+                        // Check the stop entity's type markers
+                        if (EntityManager.HasComponent<Game.Routes.TrainStop>(stopEntity))
+                            return Data.TransportStationType.TrainStation;
+                        if (EntityManager.HasComponent<Game.Routes.BusStop>(stopEntity))
+                            return Data.TransportStationType.BusStop;
+                        if (EntityManager.HasComponent<Game.Routes.TramStop>(stopEntity))
+                            return Data.TransportStationType.TramStop;
+                        if (EntityManager.HasComponent<Game.Routes.SubwayStop>(stopEntity))
+                            return Data.TransportStationType.SubwayStation;
+                        if (EntityManager.HasComponent<Game.Routes.FerryStop>(stopEntity))
+                            return Data.TransportStationType.FerryTerminal;
+                        if (EntityManager.HasComponent<Game.Routes.ShipStop>(stopEntity))
+                            return Data.TransportStationType.Port;
+                        if (EntityManager.HasComponent<Game.Routes.AirplaneStop>(stopEntity))
+                            return Data.TransportStationType.Airport;
+                        if (EntityManager.HasComponent<Game.Routes.TaxiStand>(stopEntity))
+                            return Data.TransportStationType.TaxiStand;
+                        
+                        // If stop doesn't have type marker, check if it has an owner building
+                        if (EntityManager.HasComponent<Owner>(stopEntity))
+                        {
+                            var owner = EntityManager.GetComponentData<Owner>(stopEntity);
+                            Entity ownerBuilding = owner.m_Owner;
+                            
+                            if (EntityManager.HasComponent<Game.Buildings.Building>(ownerBuilding))
+                            {
+                                // Recursively check the owner building
+                                return DetermineStationTypeFromBuilding(ownerBuilding);
+                            }
+                        }
+                    }
+                    
+                    // If waypoint has Owner, check the route's transport type
+                    if (EntityManager.HasComponent<Owner>(entity))
+                    {
+                        var waypointOwner = EntityManager.GetComponentData<Owner>(entity);
+                        var lineEntity = waypointOwner.m_Owner;
+                        
+                        if (EntityManager.HasComponent<Game.Prefabs.PrefabRef>(lineEntity))
+                        {
+                            var linePrefabRef = EntityManager.GetComponentData<Game.Prefabs.PrefabRef>(lineEntity);
+                            var linePrefab = linePrefabRef.m_Prefab;
+                            
+                            if (EntityManager.HasComponent<Game.Prefabs.TransportLineData>(linePrefab))
+                            {
+                                var transportLineData = EntityManager.GetComponentData<Game.Prefabs.TransportLineData>(linePrefab);
+                                var transportType = transportLineData.m_TransportType;
+                                
+                                // Map transport type to station type
+                                switch (transportType)
+                                {
+                                    case Game.Prefabs.TransportType.Train:
+                                        return Data.TransportStationType.TrainStation;
+                                    case Game.Prefabs.TransportType.Bus:
+                                        return Data.TransportStationType.BusStop;
+                                    case Game.Prefabs.TransportType.Subway:
+                                        return Data.TransportStationType.SubwayStation;
+                                    case Game.Prefabs.TransportType.Tram:
+                                        return Data.TransportStationType.TramStop;
+                                    case Game.Prefabs.TransportType.Ferry:
+                                        return Data.TransportStationType.FerryTerminal;
+                                    case Game.Prefabs.TransportType.Ship:
+                                        return Data.TransportStationType.Port;
+                                    case Game.Prefabs.TransportType.Airplane:
+                                        return Data.TransportStationType.Airport;
+                                    case Game.Prefabs.TransportType.Taxi:
+                                        return Data.TransportStationType.TaxiStand;
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                // Check for specific stop component types directly on the entity (for non-waypoint stops)
                 if (EntityManager.HasComponent<Game.Routes.TaxiStand>(entity))
                     return Data.TransportStationType.TaxiStand;
-                    
                 if (EntityManager.HasComponent<Game.Routes.BusStop>(entity))
                     return Data.TransportStationType.BusStop;
-                    
                 if (EntityManager.HasComponent<Game.Routes.TramStop>(entity))
                     return Data.TransportStationType.TramStop;
-                    
                 if (EntityManager.HasComponent<Game.Routes.TrainStop>(entity))
                     return Data.TransportStationType.TrainStation;
-                    
                 if (EntityManager.HasComponent<Game.Routes.SubwayStop>(entity))
                     return Data.TransportStationType.SubwayStation;
-                    
                 if (EntityManager.HasComponent<Game.Routes.FerryStop>(entity))
                     return Data.TransportStationType.FerryTerminal;
-                    
                 if (EntityManager.HasComponent<Game.Routes.ShipStop>(entity))
                     return Data.TransportStationType.Port;
-                    
                 if (EntityManager.HasComponent<Game.Routes.AirplaneStop>(entity))
                     return Data.TransportStationType.Airport;
                 
                 // Check for building station types (for buildings)
                 if (EntityManager.HasComponent<Game.Buildings.Building>(entity))
-                {
-                    // Check if it has PrefabRef to inspect the prefab
-                    if (EntityManager.HasComponent<Game.Prefabs.PrefabRef>(entity))
-                    {
-                        var prefabRef = EntityManager.GetComponentData<Game.Prefabs.PrefabRef>(entity);
-                        var prefabEntity = prefabRef.m_Prefab;
-                        
-                        // Check for cargo transport station
-                        if (EntityManager.HasComponent<Game.Prefabs.CargoTransportStationData>(prefabEntity))
-                            return Data.TransportStationType.CargoTerminal;
-                        
-                        // Check for public transport station (could be train, bus, etc.)
-                        if (EntityManager.HasComponent<Game.Prefabs.PublicTransportStationData>(prefabEntity))
-                        {
-                            // Try to determine specific type from the station name or other characteristics
-                            // For now, default to TrainStation for buildings with PublicTransportStationData
-                            return Data.TransportStationType.TrainStation;
-                        }
-                    }
-                    
-                    // Default for buildings
-                    return Data.TransportStationType.BusStation;
-                }
+                    return DetermineStationTypeFromBuilding(entity);
                 
                 // Default fallback
                 return Data.TransportStationType.BusStop;
@@ -865,6 +918,108 @@ namespace ManageResourceChains.Systems
                 return Data.TransportStationType.BusStop;
             }
         }
+
+        /// <summary>
+        /// Determine station type specifically from a building entity
+        /// </summary>
+        private Data.TransportStationType DetermineStationTypeFromBuilding(Entity buildingEntity)
+        {
+            // Try to find a connected waypoint to determine transport type from the route
+            var waypointQuery = EntityManager.CreateEntityQuery(ComponentType.ReadOnly<Game.Routes.Waypoint>());
+            var waypoints = waypointQuery.ToEntityArray(Unity.Collections.Allocator.Temp);
+            
+            foreach (var waypoint in waypoints)
+            {
+                // Check if this waypoint is connected to a stop owned by the building
+                if (EntityManager.HasComponent<Game.Routes.Connected>(waypoint))
+                {
+                    var connected = EntityManager.GetComponentData<Game.Routes.Connected>(waypoint);
+                    var stopEntity = connected.m_Connected;
+                    
+                    if (EntityManager.HasComponent<Owner>(stopEntity))
+                    {
+                        var owner = EntityManager.GetComponentData<Owner>(stopEntity);
+                        if (owner.m_Owner == buildingEntity)
+                        {
+                            // Found a waypoint connected to this building, check the route's transport type
+                            if (EntityManager.HasComponent<Owner>(waypoint))
+                            {
+                                var waypointOwner = EntityManager.GetComponentData<Owner>(waypoint);
+                                var lineEntity = waypointOwner.m_Owner;
+                                
+                                if (EntityManager.HasComponent<Game.Prefabs.PrefabRef>(lineEntity))
+                                {
+                                    var linePrefabRef = EntityManager.GetComponentData<Game.Prefabs.PrefabRef>(lineEntity);
+                                    var linePrefab = linePrefabRef.m_Prefab;
+                                    
+                                    if (EntityManager.HasComponent<Game.Prefabs.TransportLineData>(linePrefab))
+                                    {
+                                        var transportLineData = EntityManager.GetComponentData<Game.Prefabs.TransportLineData>(linePrefab);
+                                        var transportType = transportLineData.m_TransportType;
+                                        
+                                        waypoints.Dispose();
+                                        
+                                        // Map transport type to station type
+                                        switch (transportType)
+                                        {
+                                            case Game.Prefabs.TransportType.Train:
+                                                return Data.TransportStationType.TrainStation;
+                                            case Game.Prefabs.TransportType.Bus:
+                                                return Data.TransportStationType.BusStation;
+                                            case Game.Prefabs.TransportType.Subway:
+                                                return Data.TransportStationType.SubwayStation;
+                                            case Game.Prefabs.TransportType.Tram:
+                                                return Data.TransportStationType.TramStation;
+                                            case Game.Prefabs.TransportType.Ferry:
+                                                return Data.TransportStationType.FerryTerminal;
+                                            case Game.Prefabs.TransportType.Ship:
+                                                return Data.TransportStationType.Port;
+                                            case Game.Prefabs.TransportType.Airplane:
+                                                return Data.TransportStationType.Airport;
+                                            default:
+                                                return Data.TransportStationType.BusStation;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            
+            waypoints.Dispose();
+            
+            // Fallback: Check prefab data
+            if (EntityManager.HasComponent<Game.Prefabs.PrefabRef>(buildingEntity))
+            {
+                var prefabRef = EntityManager.GetComponentData<Game.Prefabs.PrefabRef>(buildingEntity);
+                var prefabEntity = prefabRef.m_Prefab;
+                
+                // Check for cargo transport station
+                if (EntityManager.HasComponent<Game.Prefabs.CargoTransportStationData>(prefabEntity))
+                    return Data.TransportStationType.CargoTerminal;
+                
+                // Check transport station data to determine type by refuel types
+                if (EntityManager.HasComponent<Game.Prefabs.TransportStationData>(prefabEntity))
+                {
+                    var stationData = EntityManager.GetComponentData<Game.Prefabs.TransportStationData>(prefabEntity);
+                    
+                    // Determine type based on what it refuels
+                    if (stationData.m_TrainRefuelTypes != Game.Vehicles.EnergyTypes.None)
+                        return Data.TransportStationType.TrainStation;
+                    if (stationData.m_AircraftRefuelTypes != Game.Vehicles.EnergyTypes.None)
+                        return Data.TransportStationType.Airport;
+                    if (stationData.m_WatercraftRefuelTypes != Game.Vehicles.EnergyTypes.None)
+                        return Data.TransportStationType.Port;
+                    if (stationData.m_CarRefuelTypes != Game.Vehicles.EnergyTypes.None)
+                        return Data.TransportStationType.BusStation;
+                }
+            }
+            
+            // Default for buildings
+            return Data.TransportStationType.BusStation;
+        }
+
 
         #endregion
 

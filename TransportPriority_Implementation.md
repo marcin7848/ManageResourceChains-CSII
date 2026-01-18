@@ -152,9 +152,46 @@ Both scenarios are definitely possible. The implementation would involve creatin
 ## 7. Implementation: Worker Transport Forcing (COMPLETED - January 2026)
 
 ### Overview
-Successfully implemented a hard-forcing system that makes workers use specific bus stops when commuting to work. The implementation uses a multi-stage trip state machine combined with careful synchronization with the game's native AI systems.
+Successfully implemented a hard-forcing system that makes workers use specific transport stops when commuting to work. The implementation uses a multi-stage trip state machine combined with careful synchronization with the game's native AI systems.
+
+**Supported Transport Types:**
+- Bus Stops and Bus Stations
+- Train Stops and Train Stations ✅
+- Tram Stops and Tram Stations
+- Subway Stops and Subway Stations
+- Ferry Stops and Ferry Terminals
+- Other waypoint-based public transport
+
+All transport types that use the game's native waypoint system are supported. The system works generically without hardcoded checks for specific transport types.
 
 ### System Architecture
+
+#### Transport Type Detection
+Located in: `Systems/ResourceChainManagementSystem.cs` → `DetermineStationType()`
+
+The system automatically detects the correct transport type when a station is selected:
+
+**For Waypoint/Stop Entities:**
+- Checks for specific component markers: `BusStop`, `TrainStop`, `TramStop`, `SubwayStop`, etc.
+- Returns the corresponding station type immediately
+
+**For Building Entities (Stations):**
+1. **Primary Method - Route Analysis:**
+   - Finds all waypoints in the world
+   - Checks if any waypoint is connected to a stop owned by the building
+   - Reads the `TransportLineData` from the route's prefab
+   - Uses the `m_TransportType` enum to determine the station type
+   - **Example:** Train line → `TransportType.Train` → `TransportStationType.TrainStation`
+
+2. **Fallback Method - Prefab Data:**
+   - Checks `CargoTransportStationData` for cargo terminals
+   - Checks `TransportStationData` refuel types:
+     - `m_TrainRefuelTypes` → Train Station
+     - `m_AircraftRefuelTypes` → Airport
+     - `m_WatercraftRefuelTypes` → Port
+     - `m_CarRefuelTypes` → Bus Station
+
+This dual-layer detection ensures correct identification even if stations have no active routes yet.
 
 #### WorkerTransportPrioritySystem
 Located in: `Systems/WorkerTransportPrioritySystem.cs`
@@ -349,6 +386,7 @@ Workers successfully:
 ### Files Modified
 - `Systems/WorkerTransportPrioritySystem.cs` - Main implementation
 - `Systems/TransportPriorityCostSystem.cs` - Soft forcing (cost modification)
+- `Systems/ResourceChainManagementSystem.cs` - Transport type detection
 - `Mod.cs` - System registration
 - `TransportPriority_Attempts.md` - Development documentation
 
@@ -358,3 +396,122 @@ Workers successfully:
 - Respects native AI animation states
 - Compatible with all public transport types that use waypoints
 - Extensible to multiple stops per trip (sequential forcing)
+
+---
+
+## 8. Train Station Support & Universal Transport Type Detection (January 2026)
+
+### Problem
+Train stations were incorrectly identified as "Bus Stop" in the UI and workers were not using them for forced transport routing.
+
+### Root Cause
+When clicking on a train station in the game, the raycast was hitting the **waypoint entity** (not the building). The initial implementation only checked for stop component types **after** checking buildings, causing waypoints to fall through to the default "BusStop" type.
+
+### Solution: Multi-Tier Transport Type Detection
+
+The `DetermineStationType()` method now uses a sophisticated detection hierarchy:
+
+#### **Tier 1: Waypoint → Connected Stop Type Check**
+When a waypoint entity is selected (most common scenario):
+1. Get the waypoint's `Connected` component
+2. Retrieve the connected stop entity
+3. Check for specific stop type markers on the stop:
+   - `TrainStop` → Train Station
+   - `BusStop` → Bus Stop
+   - `TramStop` → Tram Stop
+   - `SubwayStop` → Subway Station
+   - `FerryStop` → Ferry Terminal
+   - `ShipStop` → Port
+   - `AirplaneStop` → Airport
+   - `TaxiStand` → Taxi Stand
+
+#### **Tier 2: Stop → Owner Building Check**
+If the stop has no type marker:
+1. Get the stop's `Owner` component
+2. Check if owner is a building
+3. Recursively call `DetermineStationTypeFromBuilding()`
+
+#### **Tier 3: Waypoint → Route Transport Type**
+If no connected stop found:
+1. Get waypoint's `Owner` (the route/line entity)
+2. Read the route's `TransportLineData` prefab component
+3. Map `m_TransportType` enum to station type:
+   ```
+   Train → TrainStation
+   Bus → BusStop
+   Subway → SubwayStation
+   Tram → TramStop
+   Ferry → FerryTerminal
+   Ship → Port
+   Airplane → Airport
+   Taxi → TaxiStand
+   ```
+
+#### **Tier 4: Direct Entity Component Check**
+For entities that are stops themselves (not waypoints):
+- Check for stop component directly on entity
+- Same marker components as Tier 1
+
+#### **Tier 5: Building Analysis**
+For building entities (`DetermineStationTypeFromBuilding`):
+
+**5a. Route Analysis (Primary):**
+1. Query all waypoints in the world
+2. Find waypoints connected to stops owned by this building
+3. Read the route's `TransportLineData` 
+4. Map transport type to station type
+
+**5b. Prefab Data (Fallback):**
+1. Check for `CargoTransportStationData` → Cargo Terminal
+2. Check `TransportStationData` refuel types:
+   - `m_TrainRefuelTypes` → Train Station
+   - `m_AircraftRefuelTypes` → Airport
+   - `m_WatercraftRefuelTypes` → Port
+   - `m_CarRefuelTypes` → Bus Station
+
+### Universal Transport Support
+
+**All waypoint-based public transport types are now fully supported:**
+
+✅ **Buses**: Bus Stops & Bus Stations  
+✅ **Trains**: Train Stops & Train Stations  
+✅ **Trams**: Tram Stops & Tram Stations  
+✅ **Subways**: Subway Stops & Subway Stations  
+✅ **Ferries**: Ferry Stops & Ferry Terminals  
+✅ **Ships**: Ship Stops & Ports  
+✅ **Airplanes**: Airplane Stops & Airports  
+✅ **Taxis**: Taxi Stands  
+
+**The system works identically for all types:**
+- Workers walk to the designated stop/station
+- Wait for the vehicle
+- Board the vehicle
+- Ride to the destination stop
+- Exit and continue to workplace
+
+No hardcoded transport type checks exist in `WorkerTransportPrioritySystem` - it works generically with any entity that has:
+- Waypoint component
+- Connected component linking to a stop
+- Owner component linking to a route
+- Route with `TransportLineData`
+
+### Result
+- ✅ Correct identification and labeling of all transport station types in UI
+- ✅ Workers can be forced to use any public transport type for commuting
+- ✅ System is future-proof for new transport types added to the game
+- ✅ Robust detection with multiple fallback layers
+
+### Testing
+To verify any transport type:
+1. Create a transport line (bus, train, tram, etc.)
+2. Add the station/stop to a transport priority rule
+3. UI should display correct type (e.g., "Train Station (Entity: XXXXX)")
+4. Worker should use that transport type to commute to work
+
+### Implementation Files
+- `ResourceChainManagementSystem.DetermineStationType()` - Multi-tier detection logic
+- `ResourceChainManagementSystem.DetermineStationTypeFromBuilding()` - Building-specific detection
+- `WorkerTransportPrioritySystem` - Generic waypoint handling (no type-specific code)
+- `Data/ResourceChainConfig.cs` - `TransportStationType` enum with all types
+
+
