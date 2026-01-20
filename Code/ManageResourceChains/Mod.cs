@@ -77,11 +77,16 @@ namespace ManageResourceChains
                 log.Info("Registering TransportPriorityCostSystem...");
                 updateSystem.UpdateAt<TransportPriorityCostSystem>(SystemUpdatePhase.GameSimulation);
                 log.Info("TransportPriorityCostSystem registered!");
-
-                // Register worker transport priority system for hard forcing
-                log.Info("Registering WorkerTransportPrioritySystem...");
-                updateSystem.UpdateBefore<WorkerTransportPrioritySystemV2, Game.Simulation.ResidentAISystem>(SystemUpdatePhase.GameSimulation);
-                log.Info("WorkerTransportPrioritySystem registered!");
+                
+                // Register transport preference system
+                log.Info("Registering TransportPreferenceSystem...");
+                updateSystem.UpdateAt<TransportPreferenceSystem>(SystemUpdatePhase.GameSimulation);
+                log.Info("TransportPreferenceSystem registered!");
+                
+                // Apply Harmony patches for transport preference
+                log.Info("Applying transport preference Harmony patches...");
+                TransportPreferencePatches.ApplyPatches();
+                log.Info("Transport preference patches applied!");
             }
             catch (System.Exception ex)
             {
@@ -93,6 +98,11 @@ namespace ManageResourceChains
         public void OnDispose()
         {
             log.Info(nameof(OnDispose));
+            
+            // Remove Harmony patches
+            TransportPreferencePatches.RemovePatches();
+            ForcePathfindBusPatches.RemovePatches();
+            
             if (m_Setting != null)
             {
                 m_Setting.UnregisterInOptionsUI();
