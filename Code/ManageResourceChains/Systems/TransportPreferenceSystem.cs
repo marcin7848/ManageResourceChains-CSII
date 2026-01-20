@@ -52,7 +52,7 @@ namespace ManageResourceChains.Systems
         }
         
         // Default preference - bus transport
-        public static PreferredTransportMethod DefaultPreference = PreferredTransportMethod.Bus;
+        public static PreferredTransportMethod DefaultPreference = PreferredTransportMethod.Train;
         
         // How much to boost the preferred transport (higher = stronger preference)
         // This multiplier reduces the effective cost of the preferred transport

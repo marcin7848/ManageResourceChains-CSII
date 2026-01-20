@@ -112,6 +112,13 @@ namespace ManageResourceChains.Systems
                 DisablePersonalVehicles();
                 _modificationsApplied = true;
             }
+            else if (preference == TransportPreferenceSystem.PreferredTransportMethod.Train)
+            {
+                ApplyTrainPreference();
+                ModifyStopComfortForTrain();
+                DisablePersonalVehicles();
+                _modificationsApplied = true;
+            }
         }
         
         private void ApplyBusPreference()
@@ -319,6 +326,180 @@ namespace ManageResourceChains.Systems
             }
             
             return false;
+        }
+        
+        private bool IsTrainLine(Entity lineEntity)
+        {
+            if (!EntityManager.HasBuffer<RouteWaypoint>(lineEntity))
+            {
+                Mod.log.Info($"Line {lineEntity.Index} has no RouteWaypoint buffer");
+                return false;
+            }
+                
+            var waypoints = EntityManager.GetBuffer<RouteWaypoint>(lineEntity);
+            Mod.log.Info($"Checking line {lineEntity.Index}: {waypoints.Length} waypoints");
+            
+            foreach (var waypoint in waypoints)
+            {
+                Entity waypointEntity = waypoint.m_Waypoint;
+                if (EntityManager.Exists(waypointEntity))
+                {
+                    // Log what components this waypoint has
+                    bool hasTrainStop = EntityManager.HasComponent<TrainStop>(waypointEntity);
+                    bool hasBusStop = EntityManager.HasComponent<BusStop>(waypointEntity);
+                    bool hasTramStop = EntityManager.HasComponent<TramStop>(waypointEntity);
+                    bool hasSubwayStop = EntityManager.HasComponent<SubwayStop>(waypointEntity);
+                    bool hasTransportStop = EntityManager.HasComponent<TransportStop>(waypointEntity);
+                    
+                    Mod.log.Info($"  Waypoint {waypointEntity.Index}: Train={hasTrainStop}, Bus={hasBusStop}, Tram={hasTramStop}, Subway={hasSubwayStop}, TransportStop={hasTransportStop}");
+                    
+                    // Check for TrainStop component
+                    if (hasTrainStop)
+                    {
+                        Mod.log.Info($"  -> Found TrainStop! Line is a train line");
+                        return true;
+                    }
+                    
+                    if (EntityManager.HasComponent<Connected>(waypointEntity))
+                    {
+                        var connected = EntityManager.GetComponentData<Connected>(waypointEntity);
+                        if (EntityManager.Exists(connected.m_Connected))
+                        {
+                            bool connectedHasTrainStop = EntityManager.HasComponent<TrainStop>(connected.m_Connected);
+                            Mod.log.Info($"  Connected {connected.m_Connected.Index}: TrainStop={connectedHasTrainStop}");
+                            
+                            if (connectedHasTrainStop)
+                            {
+                                Mod.log.Info($"  -> Found TrainStop in connected! Line is a train line");
+                                return true;
+                            }
+                        }
+                    }
+                }
+            }
+            
+            Mod.log.Info($"Line {lineEntity.Index}: NOT a train line");
+            return false;
+        }
+        
+        private void ApplyTrainPreference()
+        {
+            var entities = _allTransportLineQuery.ToEntityArray(Allocator.Temp);
+            int trainLinesModified = 0;
+            int otherLinesDisabled = 0;
+            
+            foreach (var entity in entities)
+            {
+                if (!EntityManager.Exists(entity))
+                    continue;
+                    
+                var transportLine = EntityManager.GetComponentData<TransportLine>(entity);
+                
+                // Store originals if not already stored
+                if (!_originalTicketPrices.ContainsKey(entity))
+                {
+                    _originalTicketPrices[entity] = transportLine.m_TicketPrice;
+                    _originalVehicleIntervals[entity] = transportLine.m_VehicleInterval;
+                    _originalLineFlags[entity] = transportLine.m_Flags;
+                }
+                
+                bool isTrainLine = IsTrainLine(entity);
+                
+                if (isTrainLine)
+                {
+                    // Make train FREE (opposite of bus preference)
+                    if (transportLine.m_TicketPrice != 0)
+                    {
+                        transportLine.m_TicketPrice = 0;
+                        EntityManager.SetComponentData(entity, transportLine);
+                        trainLinesModified++;
+                    }
+                }
+                else
+                {
+                    // Make non-train transport EXPENSIVE
+                    bool modified = false;
+                    
+                    if (transportLine.m_VehicleInterval < 10000f)
+                    {
+                        transportLine.m_VehicleInterval = 10000f;
+                        modified = true;
+                    }
+                    
+                    if (transportLine.m_TicketPrice < NON_PREFERRED_TICKET_PRICE)
+                    {
+                        transportLine.m_TicketPrice = NON_PREFERRED_TICKET_PRICE;
+                        modified = true;
+                    }
+                    
+                    if (modified)
+                    {
+                        EntityManager.SetComponentData(entity, transportLine);
+                        otherLinesDisabled++;
+                    }
+                }
+            }
+            
+            entities.Dispose();
+            
+            if (trainLinesModified > 0 || otherLinesDisabled > 0)
+            {
+                Mod.log.Info($"Train preference: {trainLinesModified} train lines free, {otherLinesDisabled} non-train lines DISABLED");
+            }
+        }
+        
+        private void ModifyStopComfortForTrain()
+        {
+            var stopEntities = _allTransportStopQuery.ToEntityArray(Allocator.Temp);
+            int trainStopsModified = 0;
+            int otherStopsModified = 0;
+            
+            foreach (var stopEntity in stopEntities)
+            {
+                if (!EntityManager.Exists(stopEntity) || !EntityManager.HasComponent<TransportStop>(stopEntity))
+                    continue;
+                
+                var stop = EntityManager.GetComponentData<TransportStop>(stopEntity);
+                
+                // Store original comfort if not already stored
+                if (!_originalComfortFactors.ContainsKey(stopEntity))
+                {
+                    _originalComfortFactors[stopEntity] = stop.m_ComfortFactor;
+                }
+                
+                // Check if this is a train stop
+                bool isTrainStop = EntityManager.HasComponent<TrainStop>(stopEntity);
+                
+                if (isTrainStop)
+                {
+                    // Maximum comfort for train stops
+                    if (stop.m_ComfortFactor < 1.0f)
+                    {
+                        stop.m_ComfortFactor = 1.0f;
+                        stop.m_LoadingFactor = 1.0f;
+                        EntityManager.SetComponentData(stopEntity, stop);
+                        trainStopsModified++;
+                    }
+                }
+                else
+                {
+                    // Minimum comfort for non-train stops
+                    if (stop.m_ComfortFactor > 0.01f)
+                    {
+                        stop.m_ComfortFactor = 0.01f;
+                        stop.m_LoadingFactor = 0.01f;
+                        EntityManager.SetComponentData(stopEntity, stop);
+                        otherStopsModified++;
+                    }
+                }
+            }
+            
+            stopEntities.Dispose();
+            
+            if (trainStopsModified > 0 || otherStopsModified > 0)
+            {
+                Mod.log.Info($"Modified stop comfort: {trainStopsModified} train stops maximized, {otherStopsModified} other stops minimized");
+            }
         }
         
         private void RestoreAll()
