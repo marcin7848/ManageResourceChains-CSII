@@ -1,4 +1,5 @@
-﻿using System.Collections.Generic;
+﻿using System;
+using System.Collections.Generic;
 using Unity.Entities;
 using Unity.Collections;
 using Game;
@@ -9,12 +10,13 @@ using Game.Citizens;
 namespace ManageResourceChains.Systems
 {
     /// <summary>
-    /// System that enforces bus transport preference by:
-    /// 1. Setting bus line ticket prices to 0 (free)
-    /// 2. Setting non-bus line ticket prices very high
-    /// 3. Disabling CarKeeper component on citizens so they can't use personal cars
+    /// System that enforces transport preference by:
+    /// 1. Setting preferred transport line ticket prices to 0 (free)
+    /// 2. Setting non-preferred transport line ticket prices very high
+    /// 3. Manipulating comfort factors for stops
+    /// 4. Enabling/disabling personal vehicle access (CarKeeper, BicycleOwner)
     /// 
-    /// This forces the pathfinding AI to choose bus transport.
+    /// This forces the pathfinding AI to choose the preferred transport.
     /// </summary>
     public partial class TransportPriorityCostSystem : GameSystemBase
     {
@@ -23,27 +25,31 @@ namespace ManageResourceChains.Systems
         private EntityQuery _bicycleOwnerQuery;
         private EntityQuery _allTransportStopQuery;
         
-        // Track original ticket prices for restoration
+        // Track original values for restoration
         private Dictionary<Entity, ushort> _originalTicketPrices = new Dictionary<Entity, ushort>();
-        
-        // Track original stop comfort factors
         private Dictionary<Entity, float> _originalComfortFactors = new Dictionary<Entity, float>();
-        
-        // Track original vehicle intervals
         private Dictionary<Entity, float> _originalVehicleIntervals = new Dictionary<Entity, float>();
-        
-        // Track original line flags
         private Dictionary<Entity, TransportLineFlags> _originalLineFlags = new Dictionary<Entity, TransportLineFlags>();
         
-        // Track citizens whose CarKeeper we disabled
+        // Track citizens whose components we disabled
         private HashSet<Entity> _disabledCarKeepers = new HashSet<Entity>();
         private HashSet<Entity> _disabledBicycleOwners = new HashSet<Entity>();
+        
+        // Track if we've enabled components (for car/bike preference)
+        private HashSet<Entity> _enabledCarKeepers = new HashSet<Entity>();
+        private HashSet<Entity> _enabledBicycleOwners = new HashSet<Entity>();
         
         // Whether we've applied modifications
         private bool _modificationsApplied = false;
         
         // The penalty to apply to non-preferred transport (higher = less likely to be chosen)
         private const ushort NON_PREFERRED_TICKET_PRICE = 65535; // Maximum possible price (ushort.MaxValue)
+        
+        // Delegate for checking if a line is of a specific type
+        private delegate bool IsLineOfTypeDelegate(Entity lineEntity);
+        
+        // Delegate for checking if a stop is of a specific type
+        private delegate bool IsStopOfTypeDelegate(Entity stopEntity);
         
         public override int GetUpdateInterval(SystemUpdatePhase phase)
         {
@@ -54,7 +60,7 @@ namespace ManageResourceChains.Systems
         protected override void OnCreate()
         {
             base.OnCreate();
-            Mod.log.Info("TransportPriorityCostSystem created - will FORCE bus transport");
+            Mod.log.Info("TransportPriorityCostSystem created - will enforce transport preferences");
             
             _allTransportLineQuery = GetEntityQuery(new EntityQueryDesc
             {
@@ -104,27 +110,83 @@ namespace ManageResourceChains.Systems
                 return;
             }
             
-            if (preference == TransportPreferenceSystem.PreferredTransportMethod.Bus ||
-                preference == TransportPreferenceSystem.PreferredTransportMethod.PublicTransport)
+            // Apply preferences based on type
+            switch (preference)
             {
-                ApplyBusPreference();
-                ModifyStopComfort();
-                DisablePersonalVehicles();
-                _modificationsApplied = true;
+                case TransportPreferenceSystem.PreferredTransportMethod.Bus:
+                    ApplyPublicTransportPreference("Bus", IsBusLine, IsBusStop);
+                    DisablePersonalVehicles();
+                    break;
+                    
+                case TransportPreferenceSystem.PreferredTransportMethod.Train:
+                    ApplyPublicTransportPreference("Train", IsTrainLine, IsTrainStop);
+                    DisablePersonalVehicles();
+                    break;
+                    
+                case TransportPreferenceSystem.PreferredTransportMethod.Tram:
+                    ApplyPublicTransportPreference("Tram", IsTramLine, IsTramStop);
+                    DisablePersonalVehicles();
+                    break;
+                    
+                case TransportPreferenceSystem.PreferredTransportMethod.Metro:
+                    ApplyPublicTransportPreference("Metro", IsSubwayLine, IsSubwayStop);
+                    DisablePersonalVehicles();
+                    break;
+                    
+                case TransportPreferenceSystem.PreferredTransportMethod.Ferry:
+                    ApplyPublicTransportPreference("Ferry", IsShipLine, IsShipStop);
+                    DisablePersonalVehicles();
+                    break;
+                    
+                case TransportPreferenceSystem.PreferredTransportMethod.Airplane:
+                    ApplyPublicTransportPreference("Airplane", IsAirplaneLine, IsAirplaneStop);
+                    DisablePersonalVehicles();
+                    break;
+                    
+                case TransportPreferenceSystem.PreferredTransportMethod.PublicTransport:
+                    // Allow all public transport - just disable personal vehicles
+                    DisablePersonalVehicles();
+                    break;
+                    
+                case TransportPreferenceSystem.PreferredTransportMethod.Taxi:
+                    // Disable personal vehicles, make all public transport expensive
+                    ApplyTaxiPreference();
+                    DisablePersonalVehicles();
+                    break;
+                    
+                case TransportPreferenceSystem.PreferredTransportMethod.Walking:
+                    // Disable everything except walking
+                    DisableAllPublicTransport();
+                    DisablePersonalVehicles();
+                    break;
+                    
+                case TransportPreferenceSystem.PreferredTransportMethod.Bicycle:
+                    // Enable bicycles, disable everything else
+                    DisableAllPublicTransport();
+                    DisableCars();
+                    EnableBicycles();
+                    break;
+                    
+                case TransportPreferenceSystem.PreferredTransportMethod.Car:
+                    // Enable cars, disable everything else
+                    DisableAllPublicTransport();
+                    DisableBicycles();
+                    EnableCars();
+                    break;
             }
-            else if (preference == TransportPreferenceSystem.PreferredTransportMethod.Train)
-            {
-                ApplyTrainPreference();
-                ModifyStopComfortForTrain();
-                DisablePersonalVehicles();
-                _modificationsApplied = true;
-            }
+            
+            _modificationsApplied = true;
         }
         
-        private void ApplyBusPreference()
+        /// <summary>
+        /// Generic method to apply preference for a specific public transport type.
+        /// Makes the preferred type free and comfortable, all others expensive and uncomfortable.
+        /// </summary>
+        private void ApplyPublicTransportPreference(string transportName, IsLineOfTypeDelegate isPreferredLine, IsStopOfTypeDelegate isPreferredStop)
         {
+            // Apply to transport lines
             var entities = _allTransportLineQuery.ToEntityArray(Allocator.Temp);
-            int busLinesModified = 0;
+            int preferredLinesModified = 0;
             int otherLinesDisabled = 0;
             
             foreach (var entity in entities)
@@ -142,23 +204,21 @@ namespace ManageResourceChains.Systems
                     _originalLineFlags[entity] = transportLine.m_Flags;
                 }
                 
-                bool isBusLine = IsBusLine(entity);
+                bool isPreferred = isPreferredLine(entity);
                 
-                if (isBusLine)
+                if (isPreferred)
                 {
-                    // Make bus free
+                    // Make preferred transport FREE
                     if (transportLine.m_TicketPrice != 0)
                     {
                         transportLine.m_TicketPrice = 0;
                         EntityManager.SetComponentData(entity, transportLine);
-                        busLinesModified++;
+                        preferredLinesModified++;
                     }
                 }
                 else
                 {
-                    // COMPLETELY DISABLE non-bus lines by:
-                    // 1. Setting vehicle interval to max (no vehicles spawn)
-                    // 2. Setting ticket price to max
+                    // Make non-preferred transport EXPENSIVE and RARE
                     bool modified = false;
                     
                     if (transportLine.m_VehicleInterval < 10000f)
@@ -183,32 +243,96 @@ namespace ManageResourceChains.Systems
             
             entities.Dispose();
             
-            if (busLinesModified > 0 || otherLinesDisabled > 0)
+            if (preferredLinesModified > 0 || otherLinesDisabled > 0)
             {
-                Mod.log.Info($"Bus preference: {busLinesModified} bus lines free, {otherLinesDisabled} non-bus lines DISABLED");
+                Mod.log.Info($"{transportName} preference: {preferredLinesModified} {transportName.ToLower()} lines free, {otherLinesDisabled} non-{transportName.ToLower()} lines DISABLED");
+            }
+            
+            // Apply to transport stops
+            ModifyStopComfort(transportName, isPreferredStop);
+        }
+        
+        /// <summary>
+        /// Generic method to modify comfort factors of transport stops.
+        /// Preferred stops get maximum comfort, others get minimum.
+        /// </summary>
+        private void ModifyStopComfort(string transportName, IsStopOfTypeDelegate isPreferredStop)
+        {
+            var stopEntities = _allTransportStopQuery.ToEntityArray(Allocator.Temp);
+            int preferredStopsModified = 0;
+            int otherStopsModified = 0;
+            
+            foreach (var stopEntity in stopEntities)
+            {
+                if (!EntityManager.Exists(stopEntity) || !EntityManager.HasComponent<TransportStop>(stopEntity))
+                    continue;
+                
+                var stop = EntityManager.GetComponentData<TransportStop>(stopEntity);
+                
+                // Store original comfort if not already stored
+                if (!_originalComfortFactors.ContainsKey(stopEntity))
+                {
+                    _originalComfortFactors[stopEntity] = stop.m_ComfortFactor;
+                }
+                
+                bool isPreferred = isPreferredStop(stopEntity);
+                
+                if (isPreferred)
+                {
+                    // Maximum comfort for preferred stops (1.0 = no penalty)
+                    if (stop.m_ComfortFactor < 1.0f)
+                    {
+                        stop.m_ComfortFactor = 1.0f;
+                        stop.m_LoadingFactor = 1.0f; // Fast loading too
+                        EntityManager.SetComponentData(stopEntity, stop);
+                        preferredStopsModified++;
+                    }
+                }
+                else
+                {
+                    // Minimum comfort for non-preferred stops (0.01 = huge penalty)
+                    if (stop.m_ComfortFactor > 0.01f)
+                    {
+                        stop.m_ComfortFactor = 0.01f;
+                        stop.m_LoadingFactor = 0.01f; // Slow loading too
+                        EntityManager.SetComponentData(stopEntity, stop);
+                        otherStopsModified++;
+                    }
+                }
+            }
+            
+            stopEntities.Dispose();
+            
+            if (preferredStopsModified > 0 || otherStopsModified > 0)
+            {
+                Mod.log.Info($"Modified stop comfort: {preferredStopsModified} {transportName.ToLower()} stops maximized, {otherStopsModified} other stops minimized");
             }
         }
         
         /// <summary>
         /// Disable CarKeeper and BicycleOwner components so citizens can't use personal vehicles.
-        /// This forces them to use public transport or walk.
         /// </summary>
         private void DisablePersonalVehicles()
         {
+            DisableCars();
+            DisableBicycles();
+        }
+        
+        /// <summary>
+        /// Disable CarKeeper component so citizens can't use personal cars.
+        /// </summary>
+        private void DisableCars()
+        {
             int carsDisabled = 0;
-            int bikesDisabled = 0;
             
-            // Disable car access
             var carEntities = _carKeeperQuery.ToEntityArray(Allocator.Temp);
             foreach (var entity in carEntities)
             {
                 if (!EntityManager.Exists(entity))
                     continue;
                 
-                // Check if CarKeeper is enabled
                 if (EntityManager.IsComponentEnabled<CarKeeper>(entity))
                 {
-                    // Disable it so pathfinding won't consider the car
                     EntityManager.SetComponentEnabled<CarKeeper>(entity, false);
                     _disabledCarKeepers.Add(entity);
                     carsDisabled++;
@@ -216,7 +340,19 @@ namespace ManageResourceChains.Systems
             }
             carEntities.Dispose();
             
-            // Disable bicycle access
+            if (carsDisabled > 0)
+            {
+                Mod.log.Info($"Disabled cars: {carsDisabled}");
+            }
+        }
+        
+        /// <summary>
+        /// Disable BicycleOwner component so citizens can't use bicycles.
+        /// </summary>
+        private void DisableBicycles()
+        {
+            int bikesDisabled = 0;
+            
             var bikeEntities = _bicycleOwnerQuery.ToEntityArray(Allocator.Temp);
             foreach (var entity in bikeEntities)
             {
@@ -232,161 +368,75 @@ namespace ManageResourceChains.Systems
             }
             bikeEntities.Dispose();
             
-            if (carsDisabled > 0 || bikesDisabled > 0)
+            if (bikesDisabled > 0)
             {
-                Mod.log.Info($"Disabled personal vehicles: {carsDisabled} cars, {bikesDisabled} bicycles");
+                Mod.log.Info($"Disabled bicycles: {bikesDisabled}");
             }
         }
         
         /// <summary>
-        /// Modify comfort factors of transport stops to heavily favor bus stops.
-        /// High comfort = low cost in pathfinding.
+        /// Enable CarKeeper component to allow personal car use (for Car preference).
         /// </summary>
-        private void ModifyStopComfort()
+        private void EnableCars()
         {
-            var stopEntities = _allTransportStopQuery.ToEntityArray(Allocator.Temp);
-            int busStopsModified = 0;
-            int otherStopsModified = 0;
+            int carsEnabled = 0;
             
-            foreach (var stopEntity in stopEntities)
+            var carEntities = _carKeeperQuery.ToEntityArray(Allocator.Temp);
+            foreach (var entity in carEntities)
             {
-                if (!EntityManager.Exists(stopEntity) || !EntityManager.HasComponent<TransportStop>(stopEntity))
+                if (!EntityManager.Exists(entity))
                     continue;
                 
-                var stop = EntityManager.GetComponentData<TransportStop>(stopEntity);
-                
-                // Store original comfort if not already stored
-                if (!_originalComfortFactors.ContainsKey(stopEntity))
+                if (!EntityManager.IsComponentEnabled<CarKeeper>(entity))
                 {
-                    _originalComfortFactors[stopEntity] = stop.m_ComfortFactor;
-                }
-                
-                // Check if this is a bus stop
-                bool isBusStop = EntityManager.HasComponent<BusStop>(stopEntity);
-                
-                if (isBusStop)
-                {
-                    // Maximum comfort for bus stops (1.0 = no penalty)
-                    if (stop.m_ComfortFactor < 1.0f)
-                    {
-                        stop.m_ComfortFactor = 1.0f;
-                        stop.m_LoadingFactor = 1.0f; // Fast loading too
-                        EntityManager.SetComponentData(stopEntity, stop);
-                        busStopsModified++;
-                    }
-                }
-                else
-                {
-                    // Minimum comfort for non-bus stops (0.01 = huge penalty)
-                    if (stop.m_ComfortFactor > 0.01f)
-                    {
-                        stop.m_ComfortFactor = 0.01f;
-                        stop.m_LoadingFactor = 0.01f; // Slow loading too
-                        EntityManager.SetComponentData(stopEntity, stop);
-                        otherStopsModified++;
-                    }
+                    EntityManager.SetComponentEnabled<CarKeeper>(entity, true);
+                    _enabledCarKeepers.Add(entity);
+                    carsEnabled++;
                 }
             }
+            carEntities.Dispose();
             
-            stopEntities.Dispose();
-            
-            if (busStopsModified > 0 || otherStopsModified > 0)
+            if (carsEnabled > 0)
             {
-                Mod.log.Info($"Modified stop comfort: {busStopsModified} bus stops maximized, {otherStopsModified} other stops minimized");
+                Mod.log.Info($"Enabled cars: {carsEnabled}");
             }
         }
         
-        private bool IsBusLine(Entity lineEntity)
+        /// <summary>
+        /// Enable BicycleOwner component to allow bicycle use (for Bicycle preference).
+        /// </summary>
+        private void EnableBicycles()
         {
-            if (!EntityManager.HasBuffer<RouteWaypoint>(lineEntity))
-                return false;
-                
-            var waypoints = EntityManager.GetBuffer<RouteWaypoint>(lineEntity);
+            int bikesEnabled = 0;
             
-            foreach (var waypoint in waypoints)
+            var bikeEntities = _bicycleOwnerQuery.ToEntityArray(Allocator.Temp);
+            foreach (var entity in bikeEntities)
             {
-                Entity waypointEntity = waypoint.m_Waypoint;
-                if (EntityManager.Exists(waypointEntity))
+                if (!EntityManager.Exists(entity))
+                    continue;
+                
+                if (!EntityManager.IsComponentEnabled<BicycleOwner>(entity))
                 {
-                    if (EntityManager.HasComponent<BusStop>(waypointEntity))
-                    {
-                        return true;
-                    }
-                    
-                    if (EntityManager.HasComponent<Connected>(waypointEntity))
-                    {
-                        var connected = EntityManager.GetComponentData<Connected>(waypointEntity);
-                        if (EntityManager.Exists(connected.m_Connected) && 
-                            EntityManager.HasComponent<BusStop>(connected.m_Connected))
-                        {
-                            return true;
-                        }
-                    }
+                    EntityManager.SetComponentEnabled<BicycleOwner>(entity, true);
+                    _enabledBicycleOwners.Add(entity);
+                    bikesEnabled++;
                 }
             }
+            bikeEntities.Dispose();
             
-            return false;
+            if (bikesEnabled > 0)
+            {
+                Mod.log.Info($"Enabled bicycles: {bikesEnabled}");
+            }
         }
         
-        private bool IsTrainLine(Entity lineEntity)
-        {
-            if (!EntityManager.HasBuffer<RouteWaypoint>(lineEntity))
-            {
-                Mod.log.Info($"Line {lineEntity.Index} has no RouteWaypoint buffer");
-                return false;
-            }
-                
-            var waypoints = EntityManager.GetBuffer<RouteWaypoint>(lineEntity);
-            Mod.log.Info($"Checking line {lineEntity.Index}: {waypoints.Length} waypoints");
-            
-            foreach (var waypoint in waypoints)
-            {
-                Entity waypointEntity = waypoint.m_Waypoint;
-                if (EntityManager.Exists(waypointEntity))
-                {
-                    // Log what components this waypoint has
-                    bool hasTrainStop = EntityManager.HasComponent<TrainStop>(waypointEntity);
-                    bool hasBusStop = EntityManager.HasComponent<BusStop>(waypointEntity);
-                    bool hasTramStop = EntityManager.HasComponent<TramStop>(waypointEntity);
-                    bool hasSubwayStop = EntityManager.HasComponent<SubwayStop>(waypointEntity);
-                    bool hasTransportStop = EntityManager.HasComponent<TransportStop>(waypointEntity);
-                    
-                    Mod.log.Info($"  Waypoint {waypointEntity.Index}: Train={hasTrainStop}, Bus={hasBusStop}, Tram={hasTramStop}, Subway={hasSubwayStop}, TransportStop={hasTransportStop}");
-                    
-                    // Check for TrainStop component
-                    if (hasTrainStop)
-                    {
-                        Mod.log.Info($"  -> Found TrainStop! Line is a train line");
-                        return true;
-                    }
-                    
-                    if (EntityManager.HasComponent<Connected>(waypointEntity))
-                    {
-                        var connected = EntityManager.GetComponentData<Connected>(waypointEntity);
-                        if (EntityManager.Exists(connected.m_Connected))
-                        {
-                            bool connectedHasTrainStop = EntityManager.HasComponent<TrainStop>(connected.m_Connected);
-                            Mod.log.Info($"  Connected {connected.m_Connected.Index}: TrainStop={connectedHasTrainStop}");
-                            
-                            if (connectedHasTrainStop)
-                            {
-                                Mod.log.Info($"  -> Found TrainStop in connected! Line is a train line");
-                                return true;
-                            }
-                        }
-                    }
-                }
-            }
-            
-            Mod.log.Info($"Line {lineEntity.Index}: NOT a train line");
-            return false;
-        }
-        
-        private void ApplyTrainPreference()
+        /// <summary>
+        /// Make all public transport lines expensive (for Taxi, Walking, Bicycle, or Car preference).
+        /// </summary>
+        private void DisableAllPublicTransport()
         {
             var entities = _allTransportLineQuery.ToEntityArray(Allocator.Temp);
-            int trainLinesModified = 0;
-            int otherLinesDisabled = 0;
+            int linesDisabled = 0;
             
             foreach (var entity in entities)
             {
@@ -395,7 +445,6 @@ namespace ManageResourceChains.Systems
                     
                 var transportLine = EntityManager.GetComponentData<TransportLine>(entity);
                 
-                // Store originals if not already stored
                 if (!_originalTicketPrices.ContainsKey(entity))
                 {
                     _originalTicketPrices[entity] = transportLine.m_TicketPrice;
@@ -403,104 +452,141 @@ namespace ManageResourceChains.Systems
                     _originalLineFlags[entity] = transportLine.m_Flags;
                 }
                 
-                bool isTrainLine = IsTrainLine(entity);
+                bool modified = false;
                 
-                if (isTrainLine)
+                if (transportLine.m_VehicleInterval < 10000f)
                 {
-                    // Make train FREE (opposite of bus preference)
-                    if (transportLine.m_TicketPrice != 0)
-                    {
-                        transportLine.m_TicketPrice = 0;
-                        EntityManager.SetComponentData(entity, transportLine);
-                        trainLinesModified++;
-                    }
+                    transportLine.m_VehicleInterval = 10000f;
+                    modified = true;
                 }
-                else
+                
+                if (transportLine.m_TicketPrice < NON_PREFERRED_TICKET_PRICE)
                 {
-                    // Make non-train transport EXPENSIVE
-                    bool modified = false;
-                    
-                    if (transportLine.m_VehicleInterval < 10000f)
-                    {
-                        transportLine.m_VehicleInterval = 10000f;
-                        modified = true;
-                    }
-                    
-                    if (transportLine.m_TicketPrice < NON_PREFERRED_TICKET_PRICE)
-                    {
-                        transportLine.m_TicketPrice = NON_PREFERRED_TICKET_PRICE;
-                        modified = true;
-                    }
-                    
-                    if (modified)
-                    {
-                        EntityManager.SetComponentData(entity, transportLine);
-                        otherLinesDisabled++;
-                    }
+                    transportLine.m_TicketPrice = NON_PREFERRED_TICKET_PRICE;
+                    modified = true;
+                }
+                
+                if (modified)
+                {
+                    EntityManager.SetComponentData(entity, transportLine);
+                    linesDisabled++;
                 }
             }
             
             entities.Dispose();
             
-            if (trainLinesModified > 0 || otherLinesDisabled > 0)
+            if (linesDisabled > 0)
             {
-                Mod.log.Info($"Train preference: {trainLinesModified} train lines free, {otherLinesDisabled} non-train lines DISABLED");
+                Mod.log.Info($"Disabled all public transport: {linesDisabled} lines");
             }
         }
         
-        private void ModifyStopComfortForTrain()
+        /// <summary>
+        /// Apply taxi preference: make all public transport expensive but keep taxis cheap.
+        /// </summary>
+        private void ApplyTaxiPreference()
         {
-            var stopEntities = _allTransportStopQuery.ToEntityArray(Allocator.Temp);
-            int trainStopsModified = 0;
-            int otherStopsModified = 0;
-            
-            foreach (var stopEntity in stopEntities)
-            {
-                if (!EntityManager.Exists(stopEntity) || !EntityManager.HasComponent<TransportStop>(stopEntity))
-                    continue;
-                
-                var stop = EntityManager.GetComponentData<TransportStop>(stopEntity);
-                
-                // Store original comfort if not already stored
-                if (!_originalComfortFactors.ContainsKey(stopEntity))
-                {
-                    _originalComfortFactors[stopEntity] = stop.m_ComfortFactor;
-                }
-                
-                // Check if this is a train stop
-                bool isTrainStop = EntityManager.HasComponent<TrainStop>(stopEntity);
-                
-                if (isTrainStop)
-                {
-                    // Maximum comfort for train stops
-                    if (stop.m_ComfortFactor < 1.0f)
-                    {
-                        stop.m_ComfortFactor = 1.0f;
-                        stop.m_LoadingFactor = 1.0f;
-                        EntityManager.SetComponentData(stopEntity, stop);
-                        trainStopsModified++;
-                    }
-                }
-                else
-                {
-                    // Minimum comfort for non-train stops
-                    if (stop.m_ComfortFactor > 0.01f)
-                    {
-                        stop.m_ComfortFactor = 0.01f;
-                        stop.m_LoadingFactor = 0.01f;
-                        EntityManager.SetComponentData(stopEntity, stop);
-                        otherStopsModified++;
-                    }
-                }
-            }
-            
-            stopEntities.Dispose();
-            
-            if (trainStopsModified > 0 || otherStopsModified > 0)
-            {
-                Mod.log.Info($"Modified stop comfort: {trainStopsModified} train stops maximized, {otherStopsModified} other stops minimized");
-            }
+            DisableAllPublicTransport();
+            Mod.log.Info("Taxi preference: all public transport disabled");
         }
+        
+        // ========== Line Detection Methods ==========
+        
+        private bool IsBusLine(Entity lineEntity)
+        {
+            return IsLineOfType<BusStop>(lineEntity);
+        }
+        
+        private bool IsTrainLine(Entity lineEntity)
+        {
+            return IsLineOfType<TrainStop>(lineEntity);
+        }
+        
+        private bool IsTramLine(Entity lineEntity)
+        {
+            return IsLineOfType<TramStop>(lineEntity);
+        }
+        
+        private bool IsSubwayLine(Entity lineEntity)
+        {
+            return IsLineOfType<SubwayStop>(lineEntity);
+        }
+        
+        private bool IsShipLine(Entity lineEntity)
+        {
+            return IsLineOfType<ShipStop>(lineEntity);
+        }
+        
+        private bool IsAirplaneLine(Entity lineEntity)
+        {
+            return IsLineOfType<AirplaneStop>(lineEntity);
+        }
+        
+        /// <summary>
+        /// Generic method to check if a transport line uses stops of a specific type.
+        /// </summary>
+        private bool IsLineOfType<TStopComponent>(Entity lineEntity) where TStopComponent : struct, IComponentData
+        {
+            if (!EntityManager.HasBuffer<RouteWaypoint>(lineEntity))
+                return false;
+                
+            var waypoints = EntityManager.GetBuffer<RouteWaypoint>(lineEntity);
+            
+            foreach (var waypoint in waypoints)
+            {
+                Entity waypointEntity = waypoint.m_Waypoint;
+                if (EntityManager.Exists(waypointEntity))
+                {
+                    if (EntityManager.HasComponent<TStopComponent>(waypointEntity))
+                        return true;
+                    
+                    // Also check Connected entities
+                    if (EntityManager.HasComponent<Connected>(waypointEntity))
+                    {
+                        var connected = EntityManager.GetComponentData<Connected>(waypointEntity);
+                        if (EntityManager.Exists(connected.m_Connected) && 
+                            EntityManager.HasComponent<TStopComponent>(connected.m_Connected))
+                            return true;
+                    }
+                }
+            }
+            
+            return false;
+        }
+        
+        // ========== Stop Detection Methods ==========
+        
+        private bool IsBusStop(Entity stopEntity)
+        {
+            return EntityManager.HasComponent<BusStop>(stopEntity);
+        }
+        
+        private bool IsTrainStop(Entity stopEntity)
+        {
+            return EntityManager.HasComponent<TrainStop>(stopEntity);
+        }
+        
+        private bool IsTramStop(Entity stopEntity)
+        {
+            return EntityManager.HasComponent<TramStop>(stopEntity);
+        }
+        
+        private bool IsSubwayStop(Entity stopEntity)
+        {
+            return EntityManager.HasComponent<SubwayStop>(stopEntity);
+        }
+        
+        private bool IsShipStop(Entity stopEntity)
+        {
+            return EntityManager.HasComponent<ShipStop>(stopEntity);
+        }
+        
+        private bool IsAirplaneStop(Entity stopEntity)
+        {
+            return EntityManager.HasComponent<AirplaneStop>(stopEntity);
+        }
+        
+        // ========== Restoration ==========
         
         private void RestoreAll()
         {
@@ -550,7 +636,7 @@ namespace ManageResourceChains.Systems
             }
             _originalComfortFactors.Clear();
             
-            // Re-enable CarKeepers
+            // Re-enable CarKeepers that we disabled
             int carsRestored = 0;
             foreach (var entity in _disabledCarKeepers)
             {
@@ -562,7 +648,7 @@ namespace ManageResourceChains.Systems
             }
             _disabledCarKeepers.Clear();
             
-            // Re-enable BicycleOwners
+            // Re-enable BicycleOwners that we disabled
             int bikesRestored = 0;
             foreach (var entity in _disabledBicycleOwners)
             {
@@ -573,6 +659,11 @@ namespace ManageResourceChains.Systems
                 }
             }
             _disabledBicycleOwners.Clear();
+            
+            // Note: We don't need to disable cars/bikes that we enabled,
+            // since the vanilla game should manage their enabled state
+            _enabledCarKeepers.Clear();
+            _enabledBicycleOwners.Clear();
             
             if (pricesRestored > 0 || comfortRestored > 0 || carsRestored > 0 || bikesRestored > 0)
             {

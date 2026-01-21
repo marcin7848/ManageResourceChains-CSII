@@ -2,9 +2,22 @@
 
 ## Overview
 
-The Transport Priority System forces workers to use specific transport methods (currently supports **Bus** and **Train** preferences) by manipulating the game's pathfinding cost calculations and restricting available transport options.
+The Transport Priority System forces workers to use specific transport methods by manipulating the game's pathfinding cost calculations and restricting available transport options.
 
-The system works by making the preferred transport type completely free (ticket price = 0) while making all other transport types prohibitively expensive (ticket price = 65,535), combined with comfort manipulation and personal vehicle disabling.
+**Fully Supported Transport Types:**
+- ✅ **Bus** - Forces bus transport only
+- ✅ **Train** - Forces train transport only
+- ✅ **Tram** - Forces tram transport only
+- ✅ **Metro/Subway** - Forces metro/subway transport only
+- ✅ **Ferry** - Forces ferry transport only
+- ✅ **Airplane** - Forces airplane transport only
+- ✅ **Taxi** - Forces taxi transport only
+- ✅ **Walking** - Forces walking only
+- ✅ **Bicycle** - Forces bicycle transport only
+- ✅ **Car** - Forces personal car transport only
+- ⚠️ **PublicTransport** - Allows all public transport (no specific type preference)
+
+The system works by making the preferred transport completely free (ticket price = 0) while making all other transport types prohibitively expensive (ticket price = 65,535), combined with comfort manipulation and personal vehicle enabling/disabling.
 
 ## System Architecture
 
@@ -15,15 +28,22 @@ The system consists of three main components working together:
 **Purpose**: Defines the transport preference settings and provides the configuration interface.
 
 **Key Elements**:
-- `PreferredTransportMethod` enum: Defines available transport preferences (None, Bus, Train, PublicTransport, Taxi, Walking, Bicycle)
-- `DefaultPreference`: Static property that can be set to any preference (defaults to `Bus`)
+- `PreferredTransportMethod` enum: Defines available transport preferences
+- `DefaultPreference`: Static property that can be set to any preference (defaults to `Train`)
 - Acts as the central configuration point for the other systems
 
 **Fully Implemented Preferences**:
 - ✅ **Bus** - Forces bus transport only (all other transport expensive)
 - ✅ **Train** - Forces train transport only (all other transport expensive)
-- ⚠️ **PublicTransport** - Allows all public transport (no specific type preference)
-- ❌ **Taxi, Walking, Bicycle** - Not fully implemented (weight changes only)
+- ✅ **Tram** - Forces tram transport only (all other transport expensive)
+- ✅ **Metro** - Forces metro/subway transport only (all other transport expensive)
+- ✅ **Ferry** - Forces ferry transport only (all other transport expensive)
+- ✅ **Airplane** - Forces airplane transport only (all other transport expensive)
+- ✅ **Taxi** - Forces taxi transport only (all other transport expensive, personal vehicles disabled)
+- ✅ **Walking** - Forces walking only (all transport disabled)
+- ✅ **Bicycle** - Forces bicycle transport only (all other transport expensive, cars disabled)
+- ✅ **Car** - Forces personal car transport only (all public transport expensive, bikes disabled)
+- ⚠️ **PublicTransport** - Allows all public transport (no specific type preference, personal vehicles disabled)
 
 **Status**: Currently a configuration holder. Originally designed for per-frame processing but the actual enforcement happens through other systems.
 
@@ -379,35 +399,62 @@ Fire trucks, ambulances, police, etc. are **NOT affected** - they have their own
 
 Currently set via static field in code:
 ```csharp
-// Set to Bus preference (default)
+// Set to Bus preference
 TransportPreferenceSystem.DefaultPreference = PreferredTransportMethod.Bus;
 
 // Or set to Train preference
 TransportPreferenceSystem.DefaultPreference = PreferredTransportMethod.Train;
+
+// Or set to Bicycle preference
+TransportPreferenceSystem.DefaultPreference = PreferredTransportMethod.Bicycle;
 ```
 
 **Available Options**:
 - `None` - No preference, vanilla behavior, all modifications disabled
 - ✅ **`Bus`** - Force bus transport only (fully implemented)
 - ✅ **`Train`** - Force train transport only (fully implemented)
-- ⚠️ **`PublicTransport`** - Force all public transport (bus + train + tram + metro) - weight changes only
-- ❌ **`Taxi`** - Force taxi transport (weight changes only, not fully implemented)
-- ❌ **`Walking`** - Force walking (weight changes only, not fully implemented)
-- ❌ **`Bicycle`** - Force bicycle (weight changes only, not fully implemented)
+- ✅ **`Tram`** - Force tram transport only (fully implemented)
+- ✅ **`Metro`** - Force metro/subway transport only (fully implemented)
+- ✅ **`Ferry`** - Force ferry transport only (fully implemented)
+- ✅ **`Airplane`** - Force airplane transport only (fully implemented)
+- ✅ **`Taxi`** - Force taxi transport only (fully implemented)
+- ✅ **`Walking`** - Force walking only (fully implemented)
+- ✅ **`Bicycle`** - Force bicycle transport only (fully implemented)
+- ✅ **`Car`** - Force personal car transport only (fully implemented)
+- ⚠️ **`PublicTransport`** - Force all public transport (no specific type, personal vehicles disabled)
 
 ### How Preferences Work:
 
-**Bus Preference**:
-- Bus lines: ticket = 0, comfort = 1.0, vehicles spawn normally
+**Public Transport Preferences (Bus, Train, Tram, Metro, Ferry, Airplane)**:
+- Preferred lines: ticket = 0, comfort = 1.0, vehicles spawn normally
 - All other lines: ticket = 65,535, comfort = 0.01, vehicles spawn rarely
 - Cars/bikes disabled
-- Result: Workers use buses
+- Result: Workers use only the preferred transport type
 
-**Train Preference**:
-- Train lines: ticket = 0, comfort = 1.0, vehicles spawn normally
-- All other lines: ticket = 65,535, comfort = 0.01, vehicles spawn rarely
-- Cars/bikes disabled
-- Result: Workers use trains
+**Personal Transport Preferences**:
+
+**Bicycle Preference**:
+- All public transport: ticket = 65,535, vehicles spawn rarely
+- Bicycles: enabled for all citizens
+- Cars: disabled
+- Result: Workers use bicycles or walk
+
+**Car Preference**:
+- All public transport: ticket = 65,535, vehicles spawn rarely
+- Cars: enabled for all citizens
+- Bicycles: disabled
+- Result: Workers use cars or walk
+
+**Taxi Preference**:
+- All public transport: ticket = 65,535, vehicles spawn rarely
+- Cars/bikes: disabled
+- Taxis: available
+- Result: Workers use taxis or walk
+
+**Walking Preference**:
+- All public transport: ticket = 65,535, vehicles spawn rarely
+- Cars/bikes: disabled
+- Result: Workers can only walk
 
 ### Future Extensibility
 
@@ -415,191 +462,139 @@ The system is designed to support per-building or per-district preferences throu
 
 ---
 
+## Code Architecture and Refactoring
+
+The system has been refactored to use **generic methods** that eliminate code duplication across different transport types.
+
+### Generic Methods
+
+**`ApplyPublicTransportPreference<T>(string transportName, IsLineOfTypeDelegate isPreferredLine, IsStopOfTypeDelegate isPreferredStop)`**:
+- Generic method that applies preference for any public transport type
+- Takes delegates to identify lines and stops of the preferred type
+- Handles ticket price manipulation, comfort adjustments, and vehicle intervals
+- Used by: Bus, Train, Tram, Metro, Ferry, Airplane preferences
+
+**`IsLineOfType<TStopComponent>(Entity lineEntity)`**:
+- Generic method that checks if a transport line uses stops of a specific type
+- Uses C# generics with `where TStopComponent : struct, IComponentData`
+- Eliminates need for separate `IsBusLine()`, `IsTrainLine()`, etc. methods
+- Checks both direct waypoints and `Connected` component links
+
+**Example Usage**:
+```csharp
+// Instead of duplicating code for each transport type:
+bool isBusLine = IsBusLine(entity);      // Old way
+bool isTrainLine = IsTrainLine(entity);  // Old way
+
+// We now use a generic method:
+bool isBusLine = IsLineOfType<BusStop>(entity);     // New way
+bool isTrainLine = IsLineOfType<TrainStop>(entity); // New way
+```
+
+### Stop Components Used
+
+The system detects transport types using marker components from `Game.Routes`:
+- `BusStop` - Bus stops
+- `TrainStop` - Train stops
+- `TramStop` - Tram stops
+- `SubwayStop` - Metro/subway stops
+- `ShipStop` - Ferry stops
+- `AirplaneStop` - Airport stops
+
+All are empty structs implementing `IComponentData`, used as markers by the game engine.
+
+### Enable/Disable Methods
+
+The system has separate methods for enabling and disabling personal vehicles:
+- `DisableCars()` - Disables `CarKeeper` component
+- `DisableBicycles()` - Disables `BicycleOwner` component
+- `EnableCars()` - Enables `CarKeeper` component (for Car preference)
+- `EnableBicycles()` - Enables `BicycleOwner` component (for Bicycle preference)
+
+These track modified entities in `HashSet` collections for proper restoration.
+
+---
+
 ## Extending to New Transport Types
 
-The pattern for adding new transport preferences (Tram, Metro, Subway, etc.) is now established:
+Thanks to the refactored generic methods, adding new transport types is now extremely simple. All public transport types follow the same pattern.
 
-### Steps to Add New Transport Type (e.g., Tram):
+### Steps to Add New Transport Type (Example: Adding a hypothetical CableCarStop):
 
-1. **Add Detection Method** in `TransportPriorityCostSystem.cs`:
+1. **Add enum value** in `TransportPreferenceSystem.cs`:
 ```csharp
-private bool IsTramLine(Entity lineEntity)
+public enum PreferredTransportMethod
 {
-    if (!EntityManager.HasBuffer<RouteWaypoint>(lineEntity))
-        return false;
-        
-    var waypoints = EntityManager.GetBuffer<RouteWaypoint>(lineEntity);
-    foreach (var waypoint in waypoints)
-    {
-        Entity waypointEntity = waypoint.m_Waypoint;
-        if (EntityManager.Exists(waypointEntity))
-        {
-            if (EntityManager.HasComponent<TramStop>(waypointEntity))
-                return true;
-            
-            // Also check Connected entities
-            if (EntityManager.HasComponent<Connected>(waypointEntity))
-            {
-                var connected = EntityManager.GetComponentData<Connected>(waypointEntity);
-                if (EntityManager.Exists(connected.m_Connected) && 
-                    EntityManager.HasComponent<TramStop>(connected.m_Connected))
-                    return true;
-            }
-        }
-    }
-    return false;
+    // ...existing values...
+    CableCar,  // Add new type
 }
 ```
 
-2. **Add Preference Application Method**:
+2. **Add case to switch statement** in `TransportPriorityCostSystem.OnUpdate()`:
 ```csharp
-private void ApplyTramPreference()
-{
-    var entities = _allTransportLineQuery.ToEntityArray(Allocator.Temp);
-    int tramLinesModified = 0;
-    int otherLinesDisabled = 0;
-    
-    foreach (var entity in entities)
-    {
-        if (!EntityManager.Exists(entity))
-            continue;
-            
-        var transportLine = EntityManager.GetComponentData<TransportLine>(entity);
-        
-        // Store originals if not already stored
-        if (!_originalTicketPrices.ContainsKey(entity))
-        {
-            _originalTicketPrices[entity] = transportLine.m_TicketPrice;
-            _originalVehicleIntervals[entity] = transportLine.m_VehicleInterval;
-            _originalLineFlags[entity] = transportLine.m_Flags;
-        }
-        
-        bool isTramLine = IsTramLine(entity);
-        
-        if (isTramLine)
-        {
-            // Make tram FREE
-            if (transportLine.m_TicketPrice != 0)
-            {
-                transportLine.m_TicketPrice = 0;
-                EntityManager.SetComponentData(entity, transportLine);
-                tramLinesModified++;
-            }
-        }
-        else
-        {
-            // Make non-tram expensive and rare
-            bool modified = false;
-            
-            if (transportLine.m_VehicleInterval < 10000f)
-            {
-                transportLine.m_VehicleInterval = 10000f;
-                modified = true;
-            }
-            
-            if (transportLine.m_TicketPrice < NON_PREFERRED_TICKET_PRICE)
-            {
-                transportLine.m_TicketPrice = NON_PREFERRED_TICKET_PRICE;
-                modified = true;
-            }
-            
-            if (modified)
-            {
-                EntityManager.SetComponentData(entity, transportLine);
-                otherLinesDisabled++;
-            }
-        }
-    }
-    
-    entities.Dispose();
-    
-    if (tramLinesModified > 0 || otherLinesDisabled > 0)
-    {
-        Mod.log.Info($"Tram preference: {tramLinesModified} tram lines free, {otherLinesDisabled} non-tram lines DISABLED");
-    }
-}
-```
-
-3. **Add Stop Comfort Method**:
-```csharp
-private void ModifyStopComfortForTram()
-{
-    var stopEntities = _allTransportStopQuery.ToEntityArray(Allocator.Temp);
-    int tramStopsModified = 0;
-    int otherStopsModified = 0;
-    
-    foreach (var stopEntity in stopEntities)
-    {
-        if (!EntityManager.Exists(stopEntity) || !EntityManager.HasComponent<TransportStop>(stopEntity))
-            continue;
-        
-        var stop = EntityManager.GetComponentData<TransportStop>(stopEntity);
-        
-        if (!_originalComfortFactors.ContainsKey(stopEntity))
-        {
-            _originalComfortFactors[stopEntity] = stop.m_ComfortFactor;
-        }
-        
-        bool isTramStop = EntityManager.HasComponent<TramStop>(stopEntity);
-        
-        if (isTramStop)
-        {
-            // Maximum comfort for tram stops
-            if (stop.m_ComfortFactor < 1.0f)
-            {
-                stop.m_ComfortFactor = 1.0f;
-                stop.m_LoadingFactor = 1.0f;
-                EntityManager.SetComponentData(stopEntity, stop);
-                tramStopsModified++;
-            }
-        }
-        else
-        {
-            // Minimum comfort for non-tram stops
-            if (stop.m_ComfortFactor > 0.01f)
-            {
-                stop.m_ComfortFactor = 0.01f;
-                stop.m_LoadingFactor = 0.01f;
-                EntityManager.SetComponentData(stopEntity, stop);
-                otherStopsModified++;
-            }
-        }
-    }
-    
-    stopEntities.Dispose();
-    
-    if (tramStopsModified > 0 || otherStopsModified > 0)
-    {
-        Mod.log.Info($"Modified stop comfort: {tramStopsModified} tram stops maximized, {otherStopsModified} other stops minimized");
-    }
-}
-```
-
-4. **Update OnUpdate() Method**:
-```csharp
-else if (preference == TransportPreferenceSystem.PreferredTransportMethod.Tram)
-{
-    ApplyTramPreference();
-    ModifyStopComfortForTram();
+case TransportPreferenceSystem.PreferredTransportMethod.CableCar:
+    ApplyPublicTransportPreference("CableCar", IsCableCarLine, IsCableCarStop);
     DisablePersonalVehicles();
-    _modificationsApplied = true;
+    break;
+```
+
+3. **Add detection methods** (use generic helpers):
+```csharp
+private bool IsCableCarLine(Entity lineEntity)
+{
+    return IsLineOfType<CableCarStop>(lineEntity);
+}
+
+private bool IsCableCarStop(Entity stopEntity)
+{
+    return EntityManager.HasComponent<CableCarStop>(stopEntity);
 }
 ```
 
-5. **Update TransportPreferencePatches** (if needed):
-   - Train/Tram/Metro all use the same weight modifications (time=0.001, money=1000, comfort=0.001)
-   - Already handled in the switch statement for `PreferredTransportMethod.Tram`
+4. **Update TransportPreferencePatches** to include in weight modification:
+```csharp
+if (preference == TransportPreferenceSystem.PreferredTransportMethod.Bus ||
+    // ...other types...
+    preference == TransportPreferenceSystem.PreferredTransportMethod.CableCar)
+{
+    // Weight modifications
+}
+```
+
+**That's it!** The generic `ApplyPublicTransportPreference()` method handles:
+- Ticket price manipulation
+- Comfort factor adjustments
+- Vehicle interval modifications
+- Stop comfort modifications
+- Logging
+
+### Currently Implemented Transport Types:
+
+**Public Transport (use `ApplyPublicTransportPreference`):**
+- ✅ Bus (`BusStop`)
+- ✅ Train (`TrainStop`)
+- ✅ Tram (`TramStop`)
+- ✅ Metro/Subway (`SubwayStop`)
+- ✅ Ferry (`ShipStop`)
+- ✅ Airplane (`AirplaneStop`)
+
+**Personal Transport (custom logic):**
+- ✅ Taxi (disable all public transport + cars/bikes)
+- ✅ Walking (disable everything)
+- ✅ Bicycle (disable public transport + cars, enable bikes)
+- ✅ Car (disable public transport + bikes, enable cars)
 
 ### Available Stop Components:
 
-Based on decompiled code in `Game.Routes`:
-- ✅ `BusStop` - Used for buses
-- ✅ `TrainStop` - Used for trains
-- ✅ `TramStop` - Available for trams (not implemented yet)
-- ✅ `SubwayStop` - Available for metro/subway (not implemented yet)
-- ✅ `FerryStop` - Available for ferries (not implemented yet)
-- ✅ `AirplaneStop` - Available for airports (not implemented yet)
-- ✅ `ShipStop` - Available for cargo ships (not implemented yet)
+Based on `Game.Routes` namespace:
+- ✅ `BusStop` - Buses
+- ✅ `TrainStop` - Trains
+- ✅ `TramStop` - Trams
+- ✅ `SubwayStop` - Metro/Subway
+- ✅ `ShipStop` - Ferries/Ships
+- ✅ `AirplaneStop` - Airports/Airplanes
+- ✅ `HelicopterStop` - Helicopters (if game adds)
+- ✅ `TaxiStand` - Taxis (if game adds as a stop type)
 
 All follow the same pattern: empty marker structs implementing `IComponentData`.
 

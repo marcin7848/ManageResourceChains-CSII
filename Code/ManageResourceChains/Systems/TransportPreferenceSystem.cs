@@ -46,12 +46,15 @@ namespace ManageResourceChains.Systems
             Train,          // Prefer train specifically
             Metro,          // Prefer metro/subway specifically
             Tram,           // Prefer tram specifically
+            Ferry,          // Prefer ferry specifically
+            Airplane,       // Prefer airplane specifically
             Taxi,           // Prefer taxi
             Walking,        // Prefer walking
-            Bicycle         // Prefer bicycle
+            Bicycle,        // Prefer bicycle
+            Car             // Prefer personal car
         }
         
-        // Default preference - bus transport
+        // Default preference - train transport
         public static PreferredTransportMethod DefaultPreference = PreferredTransportMethod.Train;
         
         // How much to boost the preferred transport (higher = stronger preference)
@@ -144,6 +147,8 @@ namespace ManageResourceChains.Systems
                 case PreferredTransportMethod.Train:
                 case PreferredTransportMethod.Metro:
                 case PreferredTransportMethod.Tram:
+                case PreferredTransportMethod.Ferry:
+                case PreferredTransportMethod.Airplane:
                     // Heavy preference for public transport
                     // By reducing time and comfort weights, public transport becomes very attractive
                     time *= PreferenceBoostMultiplier;      // 90% reduction in time weight
@@ -168,6 +173,13 @@ namespace ManageResourceChains.Systems
                     // Bicycle preference
                     time *= 0.5f;
                     money *= 0.1f;
+                    comfort *= 0.5f;
+                    break;
+                    
+                case PreferredTransportMethod.Car:
+                    // Car preference - don't care about parking/fuel cost
+                    time *= 0.5f;       // Time still matters somewhat
+                    money *= 0.1f;      // Don't care about cost
                     comfort *= 0.5f;
                     break;
             }
@@ -204,6 +216,8 @@ namespace ManageResourceChains.Systems
                 case PreferredTransportMethod.Train:
                 case PreferredTransportMethod.Metro:
                 case PreferredTransportMethod.Tram:
+                case PreferredTransportMethod.Ferry:
+                case PreferredTransportMethod.Airplane:
                     // Allow public transport (specific line filtering happens via cost)
                     methods |= publicTransportMethods;
                     break;
@@ -218,6 +232,10 @@ namespace ManageResourceChains.Systems
                     
                 case PreferredTransportMethod.Bicycle:
                     methods |= PathMethod.Bicycle | PathMethod.BicycleParking;
+                    break;
+                    
+                case PreferredTransportMethod.Car:
+                    methods |= PathMethod.Road | PathMethod.Parking;
                     break;
             }
             

@@ -84,8 +84,8 @@ namespace ManageResourceChains.Systems
         /// <summary>
         /// Postfix patch for CitizenUtils.GetPathfindWeights
         /// 
-        /// When bus preference is enabled, we DRASTICALLY modify weights to make
-        /// any non-bus transport extremely expensive in the cost calculation.
+        /// When preference is enabled, we DRASTICALLY modify weights to make
+        /// the preferred transport extremely cheap in the cost calculation.
         /// 
         /// Weight components: (time, behaviour, money, comfort)
         /// - time: how much we care about travel time
@@ -93,10 +93,10 @@ namespace ManageResourceChains.Systems
         /// - money: ticket cost, fuel cost
         /// - comfort: crowding, walking distance, etc.
         /// 
-        /// For bus preference:
-        /// - Make time weight very low (we don't care if bus takes longer)
-        /// - Make money weight VERY HIGH (makes car fuel/parking expensive)
-        /// - Make comfort weight very low (we accept bus discomfort)
+        /// For public transport preference:
+        /// - Make time weight very low (we don't care if transport takes longer)
+        /// - Make money weight VERY HIGH (makes expensive transport prohibitive)
+        /// - Make comfort weight very low (we accept transport discomfort)
         /// </summary>
         private static void GetPathfindWeights_Postfix(ref PathfindWeights __result, Citizen citizen, Household household, int householdCitizens)
         {
@@ -107,45 +107,61 @@ namespace ManageResourceChains.Systems
             
             float4 weights = __result.m_Value;
             
+            // Public transport types (bus, train, tram, metro, ferry, airplane)
             if (preference == TransportPreferenceSystem.PreferredTransportMethod.Bus ||
+                preference == TransportPreferenceSystem.PreferredTransportMethod.Train ||
+                preference == TransportPreferenceSystem.PreferredTransportMethod.Tram ||
+                preference == TransportPreferenceSystem.PreferredTransportMethod.Metro ||
+                preference == TransportPreferenceSystem.PreferredTransportMethod.Ferry ||
+                preference == TransportPreferenceSystem.PreferredTransportMethod.Airplane ||
                 preference == TransportPreferenceSystem.PreferredTransportMethod.PublicTransport)
             {
-                // AGGRESSIVE bus preference settings:
+                // AGGRESSIVE public transport preference settings:
                 // 
                 // The trick: Cars have LOW money cost but HIGH time efficiency.
-                // Buses have HIGHER money cost (ticket) but LOWER time efficiency.
+                // Public transport has HIGHER money cost (ticket) but LOWER time efficiency.
                 // 
                 // By making time weight VERY LOW and money weight EXTREMELY HIGH,
-                // the bus's lower money cost outweighs the car's time advantage.
+                // the preferred transport's lower money cost outweighs alternatives.
                 
-                // Time weight: 0.001 (completely ignore time - we don't care if bus is slow)
+                // Time weight: 0.001 (completely ignore time)
                 weights.x = 0.001f;
                 
                 // Behaviour weight: keep normal
                 // weights.y unchanged
                 
-                // Money weight: EXTREMELY HIGH (makes non-free transport completely prohibitive)
-                // With bus ticket = 0 and train ticket = 65535, and money weight = 1000,
-                // the train cost is 65,535,000 which is astronomical
+                // Money weight: EXTREMELY HIGH (makes expensive transport completely prohibitive)
+                // With preferred ticket = 0 and non-preferred ticket = 65535, and money weight = 1000,
+                // the non-preferred cost is 65,535,000 which is astronomical
                 weights.z = 1000f;
                 
-                // Comfort weight: 0.001 (completely ignore comfort - bus crowding doesn't matter)
+                // Comfort weight: 0.001 (completely ignore comfort)
                 weights.w = 0.001f;
             }
             else if (preference == TransportPreferenceSystem.PreferredTransportMethod.Taxi)
             {
-                weights.z = 0.01f; // Don't care about taxi cost
+                // Taxi preference - don't care about cost
+                weights.z = 0.01f;
                 weights.w *= 0.5f;
             }
             else if (preference == TransportPreferenceSystem.PreferredTransportMethod.Walking)
             {
+                // Walking preference - time matters less
                 weights.x = 0.01f;
                 weights.z = 0.01f;
             }
             else if (preference == TransportPreferenceSystem.PreferredTransportMethod.Bicycle)
             {
+                // Bicycle preference
                 weights.x *= 0.3f;
                 weights.z *= 0.1f;
+                weights.w *= 0.5f;
+            }
+            else if (preference == TransportPreferenceSystem.PreferredTransportMethod.Car)
+            {
+                // Car preference - don't care about parking/fuel cost
+                weights.x *= 0.5f; // Time still matters somewhat
+                weights.z *= 0.1f; // Don't care about cost
                 weights.w *= 0.5f;
             }
             
@@ -154,7 +170,7 @@ namespace ManageResourceChains.Systems
         
         /// <summary>
         /// Helper method to get restricted path methods based on preference.
-        /// This removes car/taxi/bicycle from available methods when bus is preferred.
+        /// This removes unwanted transport methods from available options.
         /// </summary>
         public static PathMethod GetRestrictedMethods(PathMethod originalMethods)
         {
@@ -163,7 +179,13 @@ namespace ManageResourceChains.Systems
             if (preference == TransportPreferenceSystem.PreferredTransportMethod.None)
                 return originalMethods;
             
+            // Public transport preferences
             if (preference == TransportPreferenceSystem.PreferredTransportMethod.Bus ||
+                preference == TransportPreferenceSystem.PreferredTransportMethod.Train ||
+                preference == TransportPreferenceSystem.PreferredTransportMethod.Tram ||
+                preference == TransportPreferenceSystem.PreferredTransportMethod.Metro ||
+                preference == TransportPreferenceSystem.PreferredTransportMethod.Ferry ||
+                preference == TransportPreferenceSystem.PreferredTransportMethod.Airplane ||
                 preference == TransportPreferenceSystem.PreferredTransportMethod.PublicTransport)
             {
                 // Remove car-related methods
@@ -182,6 +204,27 @@ namespace ManageResourceChains.Systems
                 restricted |= PathMethod.Boarding;
                 
                 return restricted;
+            }
+            else if (preference == TransportPreferenceSystem.PreferredTransportMethod.Taxi)
+            {
+                // Remove everything except taxi and pedestrian
+                PathMethod restricted = PathMethod.Pedestrian | PathMethod.Taxi;
+                return restricted;
+            }
+            else if (preference == TransportPreferenceSystem.PreferredTransportMethod.Walking)
+            {
+                // Only pedestrian
+                return PathMethod.Pedestrian;
+            }
+            else if (preference == TransportPreferenceSystem.PreferredTransportMethod.Bicycle)
+            {
+                // Only bicycle and pedestrian
+                return PathMethod.Pedestrian | PathMethod.Bicycle | PathMethod.BicycleParking;
+            }
+            else if (preference == TransportPreferenceSystem.PreferredTransportMethod.Car)
+            {
+                // Only car and pedestrian
+                return PathMethod.Pedestrian | PathMethod.Road | PathMethod.Parking;
             }
             
             return originalMethods;
