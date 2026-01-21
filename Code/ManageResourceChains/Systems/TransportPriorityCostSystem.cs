@@ -60,7 +60,6 @@ namespace ManageResourceChains.Systems
         protected override void OnCreate()
         {
             base.OnCreate();
-            Mod.log.Info("TransportPriorityCostSystem created - will enforce transport preferences");
             
             _allTransportLineQuery = GetEntityQuery(new EntityQueryDesc
             {
@@ -143,11 +142,7 @@ namespace ManageResourceChains.Systems
                     DisablePersonalVehicles();
                     break;
                     
-                case TransportPreferenceSystem.PreferredTransportMethod.PublicTransport:
-                    // Allow all public transport - just disable personal vehicles
-                    DisablePersonalVehicles();
-                    break;
-                    
+
                 case TransportPreferenceSystem.PreferredTransportMethod.Taxi:
                     // Disable personal vehicles, make all public transport expensive
                     ApplyTaxiPreference();
@@ -243,11 +238,6 @@ namespace ManageResourceChains.Systems
             
             entities.Dispose();
             
-            if (preferredLinesModified > 0 || otherLinesDisabled > 0)
-            {
-                Mod.log.Info($"{transportName} preference: {preferredLinesModified} {transportName.ToLower()} lines free, {otherLinesDisabled} non-{transportName.ToLower()} lines DISABLED");
-            }
-            
             // Apply to transport stops
             ModifyStopComfort(transportName, isPreferredStop);
         }
@@ -302,11 +292,6 @@ namespace ManageResourceChains.Systems
             }
             
             stopEntities.Dispose();
-            
-            if (preferredStopsModified > 0 || otherStopsModified > 0)
-            {
-                Mod.log.Info($"Modified stop comfort: {preferredStopsModified} {transportName.ToLower()} stops maximized, {otherStopsModified} other stops minimized");
-            }
         }
         
         /// <summary>
@@ -323,8 +308,6 @@ namespace ManageResourceChains.Systems
         /// </summary>
         private void DisableCars()
         {
-            int carsDisabled = 0;
-            
             var carEntities = _carKeeperQuery.ToEntityArray(Allocator.Temp);
             foreach (var entity in carEntities)
             {
@@ -335,15 +318,9 @@ namespace ManageResourceChains.Systems
                 {
                     EntityManager.SetComponentEnabled<CarKeeper>(entity, false);
                     _disabledCarKeepers.Add(entity);
-                    carsDisabled++;
                 }
             }
             carEntities.Dispose();
-            
-            if (carsDisabled > 0)
-            {
-                Mod.log.Info($"Disabled cars: {carsDisabled}");
-            }
         }
         
         /// <summary>
@@ -351,8 +328,6 @@ namespace ManageResourceChains.Systems
         /// </summary>
         private void DisableBicycles()
         {
-            int bikesDisabled = 0;
-            
             var bikeEntities = _bicycleOwnerQuery.ToEntityArray(Allocator.Temp);
             foreach (var entity in bikeEntities)
             {
@@ -363,15 +338,9 @@ namespace ManageResourceChains.Systems
                 {
                     EntityManager.SetComponentEnabled<BicycleOwner>(entity, false);
                     _disabledBicycleOwners.Add(entity);
-                    bikesDisabled++;
                 }
             }
             bikeEntities.Dispose();
-            
-            if (bikesDisabled > 0)
-            {
-                Mod.log.Info($"Disabled bicycles: {bikesDisabled}");
-            }
         }
         
         /// <summary>
@@ -379,8 +348,6 @@ namespace ManageResourceChains.Systems
         /// </summary>
         private void EnableCars()
         {
-            int carsEnabled = 0;
-            
             var carEntities = _carKeeperQuery.ToEntityArray(Allocator.Temp);
             foreach (var entity in carEntities)
             {
@@ -391,15 +358,9 @@ namespace ManageResourceChains.Systems
                 {
                     EntityManager.SetComponentEnabled<CarKeeper>(entity, true);
                     _enabledCarKeepers.Add(entity);
-                    carsEnabled++;
                 }
             }
             carEntities.Dispose();
-            
-            if (carsEnabled > 0)
-            {
-                Mod.log.Info($"Enabled cars: {carsEnabled}");
-            }
         }
         
         /// <summary>
@@ -407,8 +368,6 @@ namespace ManageResourceChains.Systems
         /// </summary>
         private void EnableBicycles()
         {
-            int bikesEnabled = 0;
-            
             var bikeEntities = _bicycleOwnerQuery.ToEntityArray(Allocator.Temp);
             foreach (var entity in bikeEntities)
             {
@@ -419,15 +378,9 @@ namespace ManageResourceChains.Systems
                 {
                     EntityManager.SetComponentEnabled<BicycleOwner>(entity, true);
                     _enabledBicycleOwners.Add(entity);
-                    bikesEnabled++;
                 }
             }
             bikeEntities.Dispose();
-            
-            if (bikesEnabled > 0)
-            {
-                Mod.log.Info($"Enabled bicycles: {bikesEnabled}");
-            }
         }
         
         /// <summary>
@@ -474,11 +427,6 @@ namespace ManageResourceChains.Systems
             }
             
             entities.Dispose();
-            
-            if (linesDisabled > 0)
-            {
-                Mod.log.Info($"Disabled all public transport: {linesDisabled} lines");
-            }
         }
         
         /// <summary>
@@ -487,7 +435,6 @@ namespace ManageResourceChains.Systems
         private void ApplyTaxiPreference()
         {
             DisableAllPublicTransport();
-            Mod.log.Info("Taxi preference: all public transport disabled");
         }
         
         // ========== Line Detection Methods ==========
@@ -591,7 +538,6 @@ namespace ManageResourceChains.Systems
         private void RestoreAll()
         {
             // Restore ticket prices, vehicle intervals, and flags
-            int pricesRestored = 0;
             foreach (var kvp in _originalTicketPrices)
             {
                 Entity entity = kvp.Key;
@@ -612,7 +558,6 @@ namespace ManageResourceChains.Systems
                     }
                     
                     EntityManager.SetComponentData(entity, transportLine);
-                    pricesRestored++;
                 }
             }
             _originalTicketPrices.Clear();
@@ -620,7 +565,6 @@ namespace ManageResourceChains.Systems
             _originalLineFlags.Clear();
             
             // Restore comfort factors
-            int comfortRestored = 0;
             foreach (var kvp in _originalComfortFactors)
             {
                 Entity entity = kvp.Key;
@@ -631,31 +575,26 @@ namespace ManageResourceChains.Systems
                     var stop = EntityManager.GetComponentData<TransportStop>(entity);
                     stop.m_ComfortFactor = originalComfort;
                     EntityManager.SetComponentData(entity, stop);
-                    comfortRestored++;
                 }
             }
             _originalComfortFactors.Clear();
             
             // Re-enable CarKeepers that we disabled
-            int carsRestored = 0;
             foreach (var entity in _disabledCarKeepers)
             {
                 if (EntityManager.Exists(entity) && EntityManager.HasComponent<CarKeeper>(entity))
                 {
                     EntityManager.SetComponentEnabled<CarKeeper>(entity, true);
-                    carsRestored++;
                 }
             }
             _disabledCarKeepers.Clear();
             
             // Re-enable BicycleOwners that we disabled
-            int bikesRestored = 0;
             foreach (var entity in _disabledBicycleOwners)
             {
                 if (EntityManager.Exists(entity) && EntityManager.HasComponent<BicycleOwner>(entity))
                 {
                     EntityManager.SetComponentEnabled<BicycleOwner>(entity, true);
-                    bikesRestored++;
                 }
             }
             _disabledBicycleOwners.Clear();
@@ -664,11 +603,6 @@ namespace ManageResourceChains.Systems
             // since the vanilla game should manage their enabled state
             _enabledCarKeepers.Clear();
             _enabledBicycleOwners.Clear();
-            
-            if (pricesRestored > 0 || comfortRestored > 0 || carsRestored > 0 || bikesRestored > 0)
-            {
-                Mod.log.Info($"Restored: {pricesRestored} prices, {comfortRestored} comfort, {carsRestored} cars, {bikesRestored} bikes");
-            }
         }
         
         protected override void OnDestroy()

@@ -41,7 +41,6 @@ namespace ManageResourceChains.Systems
         public enum PreferredTransportMethod
         {
             None,           // No preference, use default pathfinding
-            PublicTransport, // Prefer all public transport (bus, train, metro, tram)
             Bus,            // Prefer bus specifically
             Train,          // Prefer train specifically
             Metro,          // Prefer metro/subway specifically
@@ -86,8 +85,6 @@ namespace ManageResourceChains.Systems
             m_HouseholdMemberLookup = GetComponentLookup<HouseholdMember>(true);
             m_HouseholdLookup = GetComponentLookup<Household>(true);
             m_HouseholdCitizenLookup = GetBufferLookup<HouseholdCitizen>(true);
-            
-            Mod.log.Info("TransportPreferenceSystem created - default preference: Bus");
         }
         
         protected override void OnUpdate()
@@ -142,7 +139,6 @@ namespace ManageResourceChains.Systems
             
             switch (preference)
             {
-                case PreferredTransportMethod.PublicTransport:
                 case PreferredTransportMethod.Bus:
                 case PreferredTransportMethod.Train:
                 case PreferredTransportMethod.Metro:
@@ -205,11 +201,6 @@ namespace ManageResourceChains.Systems
                 case PreferredTransportMethod.None:
                     // Allow all methods
                     methods |= PathMethod.Taxi | publicTransportMethods;
-                    break;
-                    
-                case PreferredTransportMethod.PublicTransport:
-                    // Only public transport, no taxi or car
-                    methods |= publicTransportMethods;
                     break;
                     
                 case PreferredTransportMethod.Bus:

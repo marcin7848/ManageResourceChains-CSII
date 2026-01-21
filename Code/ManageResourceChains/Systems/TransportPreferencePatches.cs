@@ -47,15 +47,9 @@ namespace ManageResourceChains.Systems
                         BindingFlags.Static | BindingFlags.NonPublic);
                         
                     _harmony.Patch(weightsMethod, postfix: new HarmonyMethod(postfixMethod));
-                    Mod.log.Info("Patched CitizenUtils.GetPathfindWeights");
-                }
-                else
-                {
-                    Mod.log.Warn("Could not find CitizenUtils.GetPathfindWeights");
                 }
                 
                 _patchesApplied = true;
-                Mod.log.Info("Transport preference patches applied - Bus transport will be FORCED (cars/taxi disabled)");
             }
             catch (Exception ex)
             {
@@ -73,7 +67,6 @@ namespace ManageResourceChains.Systems
             {
                 _harmony?.UnpatchAll("ManageResourceChains.TransportPreference");
                 _patchesApplied = false;
-                Mod.log.Info("Removed transport preference patches");
             }
             catch (Exception ex)
             {
@@ -113,8 +106,7 @@ namespace ManageResourceChains.Systems
                 preference == TransportPreferenceSystem.PreferredTransportMethod.Tram ||
                 preference == TransportPreferenceSystem.PreferredTransportMethod.Metro ||
                 preference == TransportPreferenceSystem.PreferredTransportMethod.Ferry ||
-                preference == TransportPreferenceSystem.PreferredTransportMethod.Airplane ||
-                preference == TransportPreferenceSystem.PreferredTransportMethod.PublicTransport)
+                preference == TransportPreferenceSystem.PreferredTransportMethod.Airplane)
             {
                 // AGGRESSIVE public transport preference settings:
                 // 
@@ -185,8 +177,7 @@ namespace ManageResourceChains.Systems
                 preference == TransportPreferenceSystem.PreferredTransportMethod.Tram ||
                 preference == TransportPreferenceSystem.PreferredTransportMethod.Metro ||
                 preference == TransportPreferenceSystem.PreferredTransportMethod.Ferry ||
-                preference == TransportPreferenceSystem.PreferredTransportMethod.Airplane ||
-                preference == TransportPreferenceSystem.PreferredTransportMethod.PublicTransport)
+                preference == TransportPreferenceSystem.PreferredTransportMethod.Airplane)
             {
                 // Remove car-related methods
                 PathMethod restricted = originalMethods;
