@@ -200,6 +200,10 @@ namespace ManageResourceChains.Systems
                     config.Type = entityType; // Ensure type is set correctly
                     config.BuildingEntityId = entityId; // Ensure ID is set correctly
                     _stagingConfigurations[key] = config;
+                    
+                    // Force immediate update of transport preferences
+                    WorkerTransportPreferenceSystem.ForceUpdate = true;
+                    
                     Mod.log.Info($"✓ Saved {entityTypeName} config to staging (not applied to game logic yet)");
                 }
             }
@@ -387,6 +391,9 @@ namespace ManageResourceChains.Systems
                 
                 // Save to disk
                 SaveConfigurations();
+                
+                // Force immediate update of transport preferences
+                WorkerTransportPreferenceSystem.ForceUpdate = true;
                 
                 Mod.log.Info("All configurations committed and saved successfully - game logic will now use updated rules");
             }

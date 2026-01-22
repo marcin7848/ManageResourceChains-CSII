@@ -83,6 +83,11 @@ namespace ManageResourceChains
                 updateSystem.UpdateAt<TransportPreferenceSystem>(SystemUpdatePhase.GameSimulation);
                 log.Info("TransportPreferenceSystem registered!");
                 
+                // Register worker transport preference system (reads configurations and updates DefaultPreference)
+                log.Info("Registering WorkerTransportPreferenceSystem...");
+                updateSystem.UpdateAt<WorkerTransportPreferenceSystem>(SystemUpdatePhase.GameSimulation);
+                log.Info("WorkerTransportPreferenceSystem registered!");
+                
                 // Apply Harmony patches for transport preference
                 log.Info("Applying transport preference Harmony patches...");
                 TransportPreferencePatches.ApplyPatches();

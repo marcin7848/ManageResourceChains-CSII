@@ -95,10 +95,17 @@ namespace ManageResourceChains.Systems
         {
             var preference = TransportPreferenceSystem.DefaultPreference;
             
+            // Log every 100th call to avoid spam
+            if (UnityEngine.Random.Range(0, 100) == 0)
+            {
+                Mod.log.Info($"GetPathfindWeights called - DefaultPreference: {preference}");
+            }
+            
             if (preference == TransportPreferenceSystem.PreferredTransportMethod.None)
                 return;
             
             float4 weights = __result.m_Value;
+            float4 originalWeights = weights;
             
             // Public transport types (bus, train, tram, metro, ferry, airplane)
             if (preference == TransportPreferenceSystem.PreferredTransportMethod.Bus ||
@@ -108,27 +115,33 @@ namespace ManageResourceChains.Systems
                 preference == TransportPreferenceSystem.PreferredTransportMethod.Ferry ||
                 preference == TransportPreferenceSystem.PreferredTransportMethod.Airplane)
             {
-                // AGGRESSIVE public transport preference settings:
+                // ULTRA-AGGRESSIVE public transport preference:
                 // 
-                // The trick: Cars have LOW money cost but HIGH time efficiency.
-                // Public transport has HIGHER money cost (ticket) but LOWER time efficiency.
+                // The pathfinding formula is: cost = dot(PathfindCosts, PathfindWeights)
+                // Where PathfindCosts = (time, behaviour, money, comfort)
                 // 
-                // By making time weight VERY LOW and money weight EXTREMELY HIGH,
-                // the preferred transport's lower money cost outweighs alternatives.
+                // Strategy: Make time and comfort weights NEAR ZERO, and money weight ASTRONOMICAL
+                // This way:
+                // - Public transport (low money cost) becomes extremely cheap
+                // - Cars/taxis (higher money cost) become impossibly expensive
+                // - Time doesn't matter (public transport can take longer)
+                // - Comfort doesn't matter (crowded buses are fine)
                 
-                // Time weight: 0.001 (completely ignore time)
-                weights.x = 0.001f;
+                // Time weight: 0.0001 (basically ignore time completely)
+                weights.x = 0.0001f;
                 
-                // Behaviour weight: keep normal
-                // weights.y unchanged
+                // Behaviour weight: 0.001 (ignore traffic rules cost)
+                weights.y = 0.001f;
                 
-                // Money weight: EXTREMELY HIGH (makes expensive transport completely prohibitive)
-                // With preferred ticket = 0 and non-preferred ticket = 65535, and money weight = 1000,
-                // the non-preferred cost is 65,535,000 which is astronomical
-                weights.z = 1000f;
+                // Money weight: 10000 (ASTRONOMICAL - makes any cost difference massive)
+                // With this weight:
+                // - Public transport ticket (~2 cost) = 20,000 pathfind cost
+                // - Car fuel/parking (~50 cost) = 500,000 pathfind cost
+                // - The difference is so huge that cars will NEVER be chosen
+                weights.z = 10000f;
                 
-                // Comfort weight: 0.001 (completely ignore comfort)
-                weights.w = 0.001f;
+                // Comfort weight: 0.0001 (ignore comfort completely)
+                weights.w = 0.0001f;
             }
             else if (preference == TransportPreferenceSystem.PreferredTransportMethod.Taxi)
             {
@@ -158,6 +171,12 @@ namespace ManageResourceChains.Systems
             }
             
             __result = new PathfindWeights(weights.x, weights.y, weights.z, weights.w);
+            
+            // Log every 100th modification to see what's happening
+            if (UnityEngine.Random.Range(0, 100) == 0)
+            {
+                Mod.log.Info($"Modified pathfind weights for {preference}: Original({originalWeights.x:F3},{originalWeights.y:F3},{originalWeights.z:F3},{originalWeights.w:F3}) -> New({weights.x:F3},{weights.y:F3},{weights.z:F3},{weights.w:F3})");
+            }
         }
         
         /// <summary>

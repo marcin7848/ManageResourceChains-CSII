@@ -53,8 +53,8 @@ namespace ManageResourceChains.Systems
             Car             // Prefer personal car
         }
         
-        // Default preference - train transport
-        public static PreferredTransportMethod DefaultPreference = PreferredTransportMethod.Train;
+        // Default preference - disabled (using per-building configuration instead)
+        public static PreferredTransportMethod DefaultPreference = PreferredTransportMethod.None;
         
         // How much to boost the preferred transport (higher = stronger preference)
         // This multiplier reduces the effective cost of the preferred transport
@@ -181,6 +181,78 @@ namespace ManageResourceChains.Systems
             }
             
             return new PathfindWeights(time, behaviour, money, comfort);
+        }
+        
+        /// <summary>
+        /// Get the transport preference for a worker based on their workplace building configuration.
+        /// If multiple transport types are enabled, randomly picks one.
+        /// </summary>
+        /// <param name="workplaceBuildingId">The entity ID of the workplace building</param>
+        /// <param name="random">Random number generator for selecting from multiple preferences</param>
+        /// <returns>The preferred transport method, or None if no preference is set</returns>
+        public static PreferredTransportMethod GetTransportPreferenceForWorker(int workplaceBuildingId, ref Unity.Mathematics.Random random)
+        {
+            try
+            {
+                // Get building configuration
+                var config = ResourceChainManagementSystem.GetBuildingConfiguration(workplaceBuildingId);
+                
+                if (config == null || config.Rules == null || config.Rules.Count == 0)
+                {
+                    return PreferredTransportMethod.None;
+                }
+                
+                // Collect all enabled transport preferences from all rules for this building
+                var enabledTransports = new System.Collections.Generic.List<PreferredTransportMethod>();
+                
+                foreach (var rule in config.Rules)
+                {
+                    // Only consider rules that affect workers
+                    if (rule.TransportType != Data.TransportType.Workers)
+                        continue;
+                    
+                    // Check if this rule applies to this building
+                    if (rule.Buildings == null || !rule.Buildings.Contains(workplaceBuildingId))
+                        continue;
+                    
+                    var prefs = rule.TransportPreferences;
+                    if (prefs == null)
+                        continue;
+                    
+                    // Collect all enabled transport types
+                    if (prefs.Bus) enabledTransports.Add(PreferredTransportMethod.Bus);
+                    if (prefs.Train) enabledTransports.Add(PreferredTransportMethod.Train);
+                    if (prefs.Tram) enabledTransports.Add(PreferredTransportMethod.Tram);
+                    if (prefs.Metro) enabledTransports.Add(PreferredTransportMethod.Metro);
+                    if (prefs.Ferry) enabledTransports.Add(PreferredTransportMethod.Ferry);
+                    if (prefs.Airplane) enabledTransports.Add(PreferredTransportMethod.Airplane);
+                    if (prefs.Taxi) enabledTransports.Add(PreferredTransportMethod.Taxi);
+                    if (prefs.Walking) enabledTransports.Add(PreferredTransportMethod.Walking);
+                    if (prefs.Bicycle) enabledTransports.Add(PreferredTransportMethod.Bicycle);
+                    if (prefs.Car) enabledTransports.Add(PreferredTransportMethod.Car);
+                }
+                
+                // If no transports are enabled, return None
+                if (enabledTransports.Count == 0)
+                {
+                    return PreferredTransportMethod.None;
+                }
+                
+                // If only one transport is enabled, return it
+                if (enabledTransports.Count == 1)
+                {
+                    return enabledTransports[0];
+                }
+                
+                // Multiple transports enabled - randomly pick one
+                int randomIndex = random.NextInt(enabledTransports.Count);
+                return enabledTransports[randomIndex];
+            }
+            catch (System.Exception ex)
+            {
+                Mod.log.Error($"Error getting transport preference for building {workplaceBuildingId}: {ex.Message}");
+                return PreferredTransportMethod.None;
+            }
         }
         
         /// <summary>

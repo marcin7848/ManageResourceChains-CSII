@@ -16,25 +16,31 @@ export enum TransportType {
     Resources = 2
 }
 
-export enum TransportStationType {
-    TrainStation = 0,
-    Airport = 1,
-    Port = 2,
-    BusStation = 3,
-    SubwayStation = 4,
-    TramStation = 5,
-    BusStop = 6,
-    TramStop = 7,
-    FerryTerminal = 8,
-    CargoTerminal = 9,
-    TaxiStand = 10
+export enum PreferredTransportType {
+    None = 0,
+    Bus = 1,
+    Train = 2,
+    Tram = 3,
+    Metro = 4,
+    Ferry = 5,
+    Airplane = 6,
+    Taxi = 7,
+    Walking = 8,
+    Bicycle = 9,
+    Car = 10
 }
 
-export interface TransportPriority {
-    id: string;
-    stationType: TransportStationType;
-    stationEntity: number;
-    priority: number;
+export interface TransportPreferences {
+    bus: boolean;
+    train: boolean;
+    tram: boolean;
+    metro: boolean;
+    ferry: boolean;
+    airplane: boolean;
+    taxi: boolean;
+    walking: boolean;
+    bicycle: boolean;
+    car: boolean;
 }
 
 export interface ResourceChainRule {
@@ -45,7 +51,7 @@ export interface ResourceChainRule {
     transportType: TransportType;
     buildings: number[];
     districts: number[];
-    transportPriorities: TransportPriority[];
+    transportPreferences: TransportPreferences; // Required field
 }
 
 export interface BuildingConfiguration {
