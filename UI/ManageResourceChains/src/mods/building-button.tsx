@@ -23,7 +23,8 @@ import {
     ChainType, 
     AllowType, 
     TransportType,
-    TransportPreferences
+    TransportPreferences,
+    EntityType
 } from "./types";
 
 // Import game UI styles like CompanyBrandChanger does
@@ -526,6 +527,12 @@ const ManageResourceChainsPanel: React.FC<{
     const anyPickerActive = buildingPickerActive || districtPickerActive;
     const [config, setConfig] = useState<BuildingConfiguration | null>(null);
     const [isLoading, setIsLoading] = useState<boolean>(true);
+    const [mountKey, setMountKey] = useState<number>(0);
+    
+    // Increment mount key on every mount to force config re-parse
+    useEffect(() => {
+        setMountKey(prev => prev + 1);
+    }, [entityId, isDistrict]);
 
     // Handle Escape key to cancel pickers
     useEffect(() => {
@@ -546,6 +553,7 @@ const ManageResourceChainsPanel: React.FC<{
     useEffect(() => {
         // Request config when entity changes
         setIsLoading(true);
+        setConfig(null); // Clear previous config
         const requestType = isDistrict ? "requestDistrictConfig" : "requestBuildingConfig";
         trigger("manageResourceChains", requestType, entityId);
     }, [entityId, isDistrict]);
@@ -553,7 +561,7 @@ const ManageResourceChainsPanel: React.FC<{
     useEffect(() => {
         // Parse config when it updates
         try {
-            if (configJson && configJson !== "{}") {
+            if (configJson && configJson !== "{}" && configJson !== "null" && configJson !== '{"__loading__":true}') {
                 const parsed = JSON.parse(configJson);
                 
                 // Ensure Rules/rules is an array
@@ -561,6 +569,7 @@ const ManageResourceChainsPanel: React.FC<{
                 if (!Array.isArray(rulesArray)) {
                     setConfig({
                         buildingEntityId: entityId,
+                        type: isDistrict ? EntityType.District : EntityType.Building,
                         rules: []
                     });
                     setIsLoading(false);
@@ -570,6 +579,7 @@ const ManageResourceChainsPanel: React.FC<{
                 // Convert camelCase from C# to match our types
                 const normalizedConfig: BuildingConfiguration = {
                     buildingEntityId: parsed.BuildingEntityId || parsed.buildingEntityId || entityId,
+                    type: parsed.Type ?? parsed.type ?? (isDistrict ? EntityType.District : EntityType.Building),
                     rules: rulesArray.map((r: any) => {
                         // Ensure all arrays exist
                         const buildings = r.Buildings || r.buildings;
@@ -602,22 +612,17 @@ const ManageResourceChainsPanel: React.FC<{
                 
                 setConfig(normalizedConfig);
                 setIsLoading(false);
-            } else {
-                setConfig({
-                    buildingEntityId: entityId,
-                    rules: []
-                });
-                setIsLoading(false);
             }
         } catch (error) {
             console.error("Error parsing config:", error);
             setConfig({
                 buildingEntityId: entityId,
+                type: isDistrict ? EntityType.District : EntityType.Building,
                 rules: []
             });
             setIsLoading(false);
         }
-    }, [configJson, entityId]);
+    }, [configJson, entityId, isDistrict, mountKey]);
 
     const addNewRule = () => {
         const newRule: ResourceChainRule = {
@@ -644,6 +649,7 @@ const ManageResourceChainsPanel: React.FC<{
 
         const currentConfig = config || {
             buildingEntityId: entityId,
+            type: isDistrict ? EntityType.District : EntityType.Building,
             rules: []
         };
         
@@ -652,6 +658,7 @@ const ManageResourceChainsPanel: React.FC<{
 
         const newConfig: BuildingConfiguration = {
             buildingEntityId: currentConfig.buildingEntityId,
+            type: currentConfig.type,
             rules: [...currentRules, newRule]
         };
         
@@ -673,7 +680,6 @@ const ManageResourceChainsPanel: React.FC<{
         // Auto-save to backend when rule is updated
         try {
             const json = JSON.stringify(newConfig);
-            console.log("Auto-saving config:", json); // Debug log
             const saveType = isDistrict ? "saveDistrictConfig" : "saveBuildingConfig";
             trigger("manageResourceChains", saveType, entityId, json);
             
@@ -708,7 +714,6 @@ const ManageResourceChainsPanel: React.FC<{
             
             // Then trigger disk save for all configurations
             setTimeout(() => {
-                console.log("Triggering disk save"); // Debug log
                 trigger("manageResourceChains", "saveAllConfigurations");
                 
                 // Close the panel after saving
@@ -1042,23 +1047,18 @@ export const DistrictButton = () => {
     const selectedDistrictEntity = useValue(selectedDistrictEntity$);
     const [isPanelOpen, setIsPanelOpen] = useState(false);
 
-    console.log("🏘️ DistrictButton render - isDistrictSelected:", isDistrictSelected, "selectedDistrictEntity:", selectedDistrictEntity);
-
     // Handle panel open/close
     const handleOpenPanel = () => {
-        console.log("🏘️ District panel opening for entity:", selectedDistrictEntity);
         setIsPanelOpen(true);
     };
 
     const handleClosePanel = () => {
-        console.log("🏘️ District panel closing");
         setIsPanelOpen(false);
     };
 
     // Close panel when district is deselected
     useEffect(() => {
         if (!isDistrictSelected || selectedDistrictEntity === 0) {
-            console.log("🏘️ District deselected, closing panel");
             setIsPanelOpen(false);
         }
     }, [isDistrictSelected, selectedDistrictEntity]);
@@ -1067,7 +1067,6 @@ export const DistrictButton = () => {
     useEffect(() => {
         if (!isDistrictSelected || selectedDistrictEntity === 0) {
             // Remove button when no district is selected
-            console.log("🏘️ Removing district button - not selected");
             const container = document.getElementById(DISTRICT_BUTTON_CONTAINER_ID);
             if (container) {
                 ReactDOM.unmountComponentAtNode(container);
@@ -1075,8 +1074,6 @@ export const DistrictButton = () => {
             }
             return;
         }
-
-        console.log("🏘️ District selected, injecting button for entity:", selectedDistrictEntity);
 
         let intervalId: number | undefined;
         let attempts = 0;
@@ -1088,16 +1085,12 @@ export const DistrictButton = () => {
             // Find the actions section
             const actionsSection = document.querySelector(ACTIONS_SECTION_CLASS);
             if (!actionsSection) {
-                if (attempts % 10 === 0) {
-                    console.log(`🏘️ Actions section not found (attempt ${attempts}/${MAX_ATTEMPTS})`);
-                }
                 return false; // Keep polling
             }
             
             // Check if button container already exists
             let container = actionsSection.querySelector<HTMLDivElement>(`#${DISTRICT_BUTTON_CONTAINER_ID}`);
             if (container) {
-                console.log("🏘️ District button container already exists");
                 return true; // Success - stop polling
             }
             
@@ -1120,8 +1113,6 @@ export const DistrictButton = () => {
                 actionsSection.appendChild(container);
             }
             
-            console.log("🏘️ District button container created and inserted");
-            
             // Render the React component into the container
             ReactDOM.render(
                 <ManageResourceChainsButton 
@@ -1130,7 +1121,6 @@ export const DistrictButton = () => {
                 container
             );
             
-            console.log("🏘️ District button rendered successfully");
             return true; // Success - stop polling
         };
         
@@ -1142,9 +1132,6 @@ export const DistrictButton = () => {
                     if (intervalId !== undefined) {
                         clearInterval(intervalId);
                         intervalId = undefined;
-                    }
-                    if (attempts >= MAX_ATTEMPTS) {
-                        console.log("🏘️ Failed to inject district button after max attempts");
                     }
                 }
             }, 100);

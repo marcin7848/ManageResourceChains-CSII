@@ -30,6 +30,11 @@ export enum PreferredTransportType {
     Car = 10
 }
 
+export enum EntityType {
+    Building = 0,
+    District = 1
+}
+
 export interface TransportPreferences {
     bus: boolean;
     train: boolean;
@@ -56,6 +61,7 @@ export interface ResourceChainRule {
 
 export interface BuildingConfiguration {
     buildingEntityId: number;
+    type: EntityType;
     rules: ResourceChainRule[];
 }
 
