@@ -1,4 +1,5 @@
 ﻿using System.Collections.Generic;
+using System.Linq;
 using Game;
 using Game.Areas;
 using Game.Buildings;
@@ -162,11 +163,25 @@ namespace ManageResourceChains.Systems
         }
 
         /// <summary>
+        /// Represents a rule with metadata about its source
+        /// </summary>
+        private class EvaluatedRule
+        {
+            public ResourceChainRule Rule { get; set; }
+            public bool IsFromDistrict { get; set; }
+            public int SourceEntityId { get; set; } // Building or District ID
+        }
+
+        /// <summary>
         /// Check if worker transport is allowed between a home and a workplace based on active rules.
-        /// Checks BOTH building-level and district-level rules.
-        /// NEW LOGIC:
-        /// - DISALLOW = Blacklist (allow everything EXCEPT listed buildings)
-        /// - ALLOW = Whitelist (allow ONLY listed buildings, block everything else)
+        /// 
+        /// Algorithm:
+        /// 1. Collect all relevant rules from both buildings and their districts
+        /// 2. Filter rules by direction (OUTGOING from home, INCOMING to workplace)
+        /// 3. Remove district rules if building rules exist (building rules have priority)
+        /// 4. Evaluate remaining rules to determine if transport is allowed
+        /// 
+        /// See WorkerTransportRules.md for detailed documentation.
         /// </summary>
         /// <param name="homeBuilding">Home building entity ID</param>
         /// <param name="workplaceBuilding">Workplace building entity ID</param>
@@ -183,168 +198,208 @@ namespace ManageResourceChains.Systems
 
             // Get all building configurations
             var buildingConfigs = m_ResourceChainManagementSystem.GetAllConfigurations();
-
-            // Get all district configurations
             var districtConfigs = m_ResourceChainManagementSystem.GetAllDistrictConfigurations();
 
             if ((buildingConfigs == null || buildingConfigs.Count == 0) &&
                 (districtConfigs == null || districtConfigs.Count == 0))
             {
-                return true; // No rules, allow everything
+                return true; // No rules configured, allow everything
             }
 
             // Get districts for both buildings
             Entity homeDistrict = GetBuildingDistrict(homeEntity, currentDistrictLookup);
             Entity workplaceDistrict = GetBuildingDistrict(workplaceEntity, currentDistrictLookup);
 
+            // STEP 1: Collect all potentially relevant rules
+            var allRules = new List<EvaluatedRule>();
 
-            // Check BUILDING-LEVEL rules first (they take priority)
-            if (buildingConfigs != null)
+            // Collect rules from home building
+            if (buildingConfigs != null && buildingConfigs.TryGetValue(homeBuilding, out var homeConfig))
             {
-                foreach (var config in buildingConfigs.Values)
+                foreach (var rule in homeConfig.Rules)
                 {
-                    foreach (var rule in config.Rules)
+                    if (rule.TransportType == TransportType.Workers)
                     {
-                        // Skip if not a worker rule
-                        if (rule.TransportType != TransportType.Workers)
-                            continue;
-
-                        // Check OUTGOING rules from HOME
-                        if (rule.Type == ChainType.Outgoing && config.BuildingEntityId == homeBuilding)
+                        allRules.Add(new EvaluatedRule
                         {
-                            // Check if workplace is directly in the buildings list OR in one of the listed districts
-                            bool isInList = rule.Buildings.Contains(workplaceBuilding) ||
-                                            (workplaceDistrict != Entity.Null &&
-                                             rule.Districts.Contains(workplaceDistrict.Index));
-
-                            if (rule.Allow == AllowType.Disallow)
-                            {
-                                // DISALLOW = Blacklist: Block if IN the list
-                                if (isInList)
-                                {
-                                    return false;
-                                }
-                            }
-                            else // AllowType.Allow
-                            {
-                                // ALLOW = Whitelist: Block if NOT in the list
-                                if (!isInList)
-                                {
-                                    return false;
-                                }
-                            }
-                        }
-
-                        // Check INCOMING rules to WORKPLACE
-                        if (rule.Type == ChainType.Incoming && config.BuildingEntityId == workplaceBuilding)
-                        {
-                            // Check if home is directly in the buildings list OR in one of the listed districts
-                            bool isInList = rule.Buildings.Contains(homeBuilding) ||
-                                            (homeDistrict != Entity.Null &&
-                                             rule.Districts.Contains(homeDistrict.Index));
-
-                            if (rule.Allow == AllowType.Disallow)
-                            {
-                                // DISALLOW = Blacklist: Block if IN the list
-                                if (isInList)
-                                {
-                                    return false;
-                                }
-                            }
-                            else // AllowType.Allow
-                            {
-                                // ALLOW = Whitelist: Block if NOT in the list
-                                if (!isInList)
-                                {
-                                    return false;
-                                }
-                            }
-                        }
+                            Rule = rule,
+                            IsFromDistrict = false,
+                            SourceEntityId = homeBuilding
+                        });
                     }
                 }
             }
 
-            // Check DISTRICT-LEVEL rules (apply if building has no specific rules)
-            if (districtConfigs != null)
+            // Collect rules from workplace building
+            if (buildingConfigs != null && buildingConfigs.TryGetValue(workplaceBuilding, out var workplaceConfig))
             {
-                // Check home district rules (OUTGOING)
-                if (homeDistrict != Entity.Null &&
-                    districtConfigs.TryGetValue(homeDistrict.Index, out var homeDistrictConfig))
+                foreach (var rule in workplaceConfig.Rules)
                 {
-                    foreach (var rule in homeDistrictConfig.Rules)
+                    if (rule.TransportType == TransportType.Workers)
                     {
-                        // Skip if not a worker rule
-                        if (rule.TransportType != TransportType.Workers)
-                            continue;
-
-                        // Check OUTGOING rules from HOME DISTRICT
-                        if (rule.Type == ChainType.Outgoing)
+                        allRules.Add(new EvaluatedRule
                         {
-                            // Check if workplace is directly in the buildings list OR in one of the listed districts
-                            bool isInList = rule.Buildings.Contains(workplaceBuilding) ||
-                                            (workplaceDistrict != Entity.Null &&
-                                             rule.Districts.Contains(workplaceDistrict.Index));
-
-                            if (rule.Allow == AllowType.Disallow)
-                            {
-                                // DISALLOW = Blacklist: Block if IN the list
-                                if (isInList)
-                                {
-                                    return false;
-                                }
-                            }
-                            else // AllowType.Allow
-                            {
-                                // ALLOW = Whitelist: Block if NOT in the list
-                                if (!isInList)
-                                {
-                                    return false;
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // Check workplace district rules (INCOMING)
-                if (workplaceDistrict != Entity.Null &&
-                    districtConfigs.TryGetValue(workplaceDistrict.Index, out var workplaceDistrictConfig))
-                {
-                    foreach (var rule in workplaceDistrictConfig.Rules)
-                    {
-                        // Skip if not a worker rule
-                        if (rule.TransportType != TransportType.Workers)
-                            continue;
-
-                        // Check INCOMING rules to WORKPLACE DISTRICT
-                        if (rule.Type == ChainType.Incoming)
-                        {
-                            // Check if home is directly in the buildings list OR in one of the listed districts
-                            bool isInList = rule.Buildings.Contains(homeBuilding) ||
-                                            (homeDistrict != Entity.Null &&
-                                             rule.Districts.Contains(homeDistrict.Index));
-
-                            if (rule.Allow == AllowType.Disallow)
-                            {
-                                // DISALLOW = Blacklist: Block if IN the list
-                                if (isInList)
-                                {
-                                    return false;
-                                }
-                            }
-                            else // AllowType.Allow
-                            {
-                                // ALLOW = Whitelist: Block if NOT in the list
-                                if (!isInList)
-                                {
-                                    return false;
-                                }
-                            }
-                        }
+                            Rule = rule,
+                            IsFromDistrict = false,
+                            SourceEntityId = workplaceBuilding
+                        });
                     }
                 }
             }
 
-            // No blocking rules found, allow transport
+            // Collect rules from home district
+            if (homeDistrict != Entity.Null && districtConfigs != null &&
+                districtConfigs.TryGetValue(homeDistrict.Index, out var homeDistrictConfig))
+            {
+                foreach (var rule in homeDistrictConfig.Rules)
+                {
+                    if (rule.TransportType == TransportType.Workers)
+                    {
+                        allRules.Add(new EvaluatedRule
+                        {
+                            Rule = rule,
+                            IsFromDistrict = true,
+                            SourceEntityId = homeDistrict.Index
+                        });
+                    }
+                }
+            }
+
+            // Collect rules from workplace district
+            if (workplaceDistrict != Entity.Null && districtConfigs != null &&
+                districtConfigs.TryGetValue(workplaceDistrict.Index, out var workplaceDistrictConfig))
+            {
+                foreach (var rule in workplaceDistrictConfig.Rules)
+                {
+                    if (rule.TransportType == TransportType.Workers)
+                    {
+                        allRules.Add(new EvaluatedRule
+                        {
+                            Rule = rule,
+                            IsFromDistrict = true,
+                            SourceEntityId = workplaceDistrict.Index
+                        });
+                    }
+                }
+            }
+
+            // If no rules found, allow transport
+            if (allRules.Count == 0)
+                return true;
+
+            // STEP 2: Filter by direction - keep only OUTGOING from home and INCOMING to workplace
+            var directionFilteredRules = new List<EvaluatedRule>();
+
+            foreach (var evaluatedRule in allRules)
+            {
+                bool isFromHome = evaluatedRule.SourceEntityId == homeBuilding ||
+                                  (homeDistrict != Entity.Null && evaluatedRule.SourceEntityId == homeDistrict.Index &&
+                                   evaluatedRule.IsFromDistrict);
+
+                bool isFromWorkplace = evaluatedRule.SourceEntityId == workplaceBuilding ||
+                                       (workplaceDistrict != Entity.Null &&
+                                        evaluatedRule.SourceEntityId == workplaceDistrict.Index &&
+                                        evaluatedRule.IsFromDistrict);
+
+                // Keep OUTGOING rules from home or its district
+                if (isFromHome && evaluatedRule.Rule.Type == ChainType.Outgoing)
+                {
+                    directionFilteredRules.Add(evaluatedRule);
+                }
+                // Keep INCOMING rules to workplace or its district
+                else if (isFromWorkplace && evaluatedRule.Rule.Type == ChainType.Incoming)
+                {
+                    directionFilteredRules.Add(evaluatedRule);
+                }
+            }
+
+            // If no rules match the direction, allow transport
+            if (directionFilteredRules.Count == 0)
+                return true;
+
+            // STEP 3: Remove district rules if building rules exist (building rules have priority)
+            bool hasBuildingRules = directionFilteredRules.Any(r => !r.IsFromDistrict);
+
+            var finalRules = hasBuildingRules
+                ? directionFilteredRules.Where(r => !r.IsFromDistrict).ToList()
+                : directionFilteredRules;
+
+            // If after filtering no rules remain, allow transport
+            if (finalRules.Count == 0)
+                return true;
+
+            // STEP 4: Evaluate remaining rules
+            return EvaluateRules(finalRules, homeBuilding, workplaceBuilding, homeDistrict, workplaceDistrict);
+        }
+
+        /// <summary>
+        /// Evaluates a list of rules to determine if transport is allowed.
+        /// 
+        /// Logic:
+        /// - ALLOW rules act as a whitelist: transport is allowed ONLY if target matches
+        /// - DISALLOW rules act as a blacklist: transport is blocked if target matches
+        /// - If any DISALLOW rule matches, transport is blocked
+        /// - If any ALLOW rule exists but none match, transport is blocked
+        /// - If only DISALLOW rules exist and none match, transport is allowed
+        /// </summary>
+        private bool EvaluateRules(List<EvaluatedRule> rules, int homeBuilding, int workplaceBuilding,
+            Entity homeDistrict, Entity workplaceDistrict)
+        {
+            bool hasAllowRules = false;
+            bool hasMatchingAllowRule = false;
+            bool hasMatchingDisallowRule = false;
+
+            foreach (var evaluatedRule in rules)
+            {
+                var rule = evaluatedRule.Rule;
+
+                // Determine the target building and district based on rule direction
+                int targetBuilding;
+                Entity targetDistrict;
+
+                if (rule.Type == ChainType.Outgoing)
+                {
+                    // OUTGOING from home -> check if workplace is in the rule's target list
+                    targetBuilding = workplaceBuilding;
+                    targetDistrict = workplaceDistrict;
+                }
+                else // ChainType.Incoming
+                {
+                    // INCOMING to workplace -> check if home is in the rule's target list
+                    targetBuilding = homeBuilding;
+                    targetDistrict = homeDistrict;
+                }
+
+                // Check if target matches the rule
+                bool isInList = rule.Buildings.Contains(targetBuilding) ||
+                                (targetDistrict != Entity.Null && rule.Districts.Contains(targetDistrict.Index));
+
+                if (rule.Allow == AllowType.Allow)
+                {
+                    hasAllowRules = true;
+                    if (isInList)
+                    {
+                        hasMatchingAllowRule = true;
+                    }
+                }
+                else // AllowType.Disallow
+                {
+                    if (isInList)
+                    {
+                        hasMatchingDisallowRule = true;
+                    }
+                }
+            }
+
+            // If any DISALLOW rule matches, block transport
+            if (hasMatchingDisallowRule)
+                return false;
+
+            // If there are ALLOW rules but none match, block transport
+            if (hasAllowRules && !hasMatchingAllowRule)
+                return false;
+
+            // Otherwise, allow transport
             return true;
         }
     }
