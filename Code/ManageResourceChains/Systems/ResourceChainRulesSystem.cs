@@ -19,7 +19,7 @@ namespace ManageResourceChains.Systems
     /// to block or allow transport of workers, services, and resources between buildings.
     /// This system also enforces worker restrictions by removing workers from disallowed workplaces.
     /// </summary>
-    public partial class ResourceChainPathfindSystem : GameSystemBase
+    public partial class ResourceChainRulesSystem : GameSystemBase
     {
         /// <summary>
         /// Burst-compiled job that checks workers in parallel and marks invalid ones for removal
@@ -391,7 +391,7 @@ namespace ManageResourceChains.Systems
                 }
             });
 
-            Mod.log.Info($"{nameof(ResourceChainPathfindSystem)} created - Worker restriction enforcement enabled");
+            Mod.log.Info($"{nameof(ResourceChainRulesSystem)} created - Worker restriction enforcement enabled");
         }
 
         protected override void OnUpdate()
