@@ -7,6 +7,8 @@ using Game.Citizens;
 using Game.Common;
 using Game.Companies;
 using ManageResourceChains.Data;
+using Unity.Burst;
+using Unity.Burst.Intrinsics;
 using Unity.Collections;
 using Unity.Entities;
 
@@ -19,6 +21,343 @@ namespace ManageResourceChains.Systems
     /// </summary>
     public partial class ResourceChainPathfindSystem : GameSystemBase
     {
+        /// <summary>
+        /// Burst-compiled job that checks workers in parallel and marks invalid ones for removal
+        /// </summary>
+        [BurstCompile]
+        private struct CheckWorkerRestrictionsJob : IJobChunk
+        {
+            [ReadOnly] public EntityTypeHandle EntityType;
+            [ReadOnly] public ComponentTypeHandle<Worker> WorkerType;
+            [ReadOnly] public ComponentTypeHandle<HouseholdMember> HouseholdMemberType;
+            [ReadOnly] public ComponentLookup<PropertyRenter> PropertyRenterLookup;
+            [ReadOnly] public ComponentLookup<CurrentDistrict> CurrentDistrictLookup;
+            [ReadOnly] public NativeHashMap<int, ConfigData> BuildingConfigs;
+            [ReadOnly] public NativeHashMap<int, ConfigData> DistrictConfigs;
+            
+            public NativeQueue<WorkerRemovalData>.ParallelWriter WorkersToRemove;
+
+            public void Execute(in ArchetypeChunk chunk, int unfilteredChunkIndex, bool useEnabledMask,
+                in v128 chunkEnabledMask)
+            {
+                var entities = chunk.GetNativeArray(EntityType);
+                var workers = chunk.GetNativeArray(ref WorkerType);
+                var householdMembers = chunk.GetNativeArray(ref HouseholdMemberType);
+
+                for (int i = 0; i < entities.Length; i++)
+                {
+                    Entity citizenEntity = entities[i];
+                    Worker worker = workers[i];
+                    Entity workplace = worker.m_Workplace;
+
+                    if (workplace == Entity.Null)
+                        continue;
+
+                    // Get the citizen's home building
+                    Entity household = householdMembers[i].m_Household;
+                    Entity homeBuilding = Entity.Null;
+
+                    if (PropertyRenterLookup.HasComponent(household))
+                    {
+                        homeBuilding = PropertyRenterLookup[household].m_Property;
+                    }
+
+                    if (homeBuilding == Entity.Null)
+                        continue;
+
+                    // Check if this worker is allowed
+                    int homeId = homeBuilding.Index;
+                    int workplaceId = workplace.Index;
+
+                    bool isAllowed = IsWorkerTransportAllowedJob(homeId, workplaceId, homeBuilding, workplace,
+                        CurrentDistrictLookup, BuildingConfigs, DistrictConfigs);
+
+                    if (!isAllowed)
+                    {
+                        WorkersToRemove.Enqueue(new WorkerRemovalData
+                        {
+                            CitizenEntity = citizenEntity,
+                            WorkplaceEntity = workplace
+                        });
+                    }
+                }
+            }
+
+            /// <summary>
+            /// Job-compatible version of IsWorkerTransportAllowed that uses NativeHashMaps
+            /// </summary>
+            private static bool IsWorkerTransportAllowedJob(int homeBuilding, int workplaceBuilding,
+                Entity homeEntity, Entity workplaceEntity,
+                ComponentLookup<CurrentDistrict> currentDistrictLookup,
+                NativeHashMap<int, ConfigData> buildingConfigs,
+                NativeHashMap<int, ConfigData> districtConfigs)
+            {
+                if (buildingConfigs.Count == 0 && districtConfigs.Count == 0)
+                    return true;
+
+                // Get districts
+                Entity homeDistrict = GetBuildingDistrictJob(homeEntity, currentDistrictLookup);
+                Entity workplaceDistrict = GetBuildingDistrictJob(workplaceEntity, currentDistrictLookup);
+
+                // Collect relevant rules
+                var relevantRules = new NativeList<RuleData>(8, Allocator.Temp);
+
+                // Collect from home building
+                if (buildingConfigs.TryGetValue(homeBuilding, out var homeConfig))
+                {
+                    for (int i = 0; i < homeConfig.Rules.Length; i++)
+                    {
+                        var rule = homeConfig.Rules[i];
+                        if (rule.TransportType == (byte)TransportType.Workers)
+                        {
+                            relevantRules.Add(new RuleData
+                            {
+                                Rule = rule,
+                                IsFromDistrict = false,
+                                SourceEntityId = homeBuilding
+                            });
+                        }
+                    }
+                }
+
+                // Collect from workplace building
+                if (buildingConfigs.TryGetValue(workplaceBuilding, out var workplaceConfig))
+                {
+                    for (int i = 0; i < workplaceConfig.Rules.Length; i++)
+                    {
+                        var rule = workplaceConfig.Rules[i];
+                        if (rule.TransportType == (byte)TransportType.Workers)
+                        {
+                            relevantRules.Add(new RuleData
+                            {
+                                Rule = rule,
+                                IsFromDistrict = false,
+                                SourceEntityId = workplaceBuilding
+                            });
+                        }
+                    }
+                }
+
+                // Collect from districts
+                if (homeDistrict != Entity.Null && districtConfigs.TryGetValue(homeDistrict.Index, out var homeDistrictConfig))
+                {
+                    for (int i = 0; i < homeDistrictConfig.Rules.Length; i++)
+                    {
+                        var rule = homeDistrictConfig.Rules[i];
+                        if (rule.TransportType == (byte)TransportType.Workers)
+                        {
+                            relevantRules.Add(new RuleData
+                            {
+                                Rule = rule,
+                                IsFromDistrict = true,
+                                SourceEntityId = homeDistrict.Index
+                            });
+                        }
+                    }
+                }
+
+                if (workplaceDistrict != Entity.Null && districtConfigs.TryGetValue(workplaceDistrict.Index, out var workplaceDistrictConfig))
+                {
+                    for (int i = 0; i < workplaceDistrictConfig.Rules.Length; i++)
+                    {
+                        var rule = workplaceDistrictConfig.Rules[i];
+                        if (rule.TransportType == (byte)TransportType.Workers)
+                        {
+                            relevantRules.Add(new RuleData
+                            {
+                                Rule = rule,
+                                IsFromDistrict = true,
+                                SourceEntityId = workplaceDistrict.Index
+                            });
+                        }
+                    }
+                }
+
+                if (relevantRules.Length == 0)
+                {
+                    relevantRules.Dispose();
+                    return true;
+                }
+
+                // Filter by direction
+                var directionFiltered = new NativeList<RuleData>(relevantRules.Length, Allocator.Temp);
+                for (int i = 0; i < relevantRules.Length; i++)
+                {
+                    var ruleData = relevantRules[i];
+                    bool isFromHome = ruleData.SourceEntityId == homeBuilding ||
+                                      (homeDistrict != Entity.Null && ruleData.SourceEntityId == homeDistrict.Index && ruleData.IsFromDistrict);
+                    bool isFromWorkplace = ruleData.SourceEntityId == workplaceBuilding ||
+                                           (workplaceDistrict != Entity.Null && ruleData.SourceEntityId == workplaceDistrict.Index && ruleData.IsFromDistrict);
+
+                    if ((isFromHome && ruleData.Rule.Type == (byte)ChainType.Outgoing) ||
+                        (isFromWorkplace && ruleData.Rule.Type == (byte)ChainType.Incoming))
+                    {
+                        directionFiltered.Add(ruleData);
+                    }
+                }
+
+                if (directionFiltered.Length == 0)
+                {
+                    relevantRules.Dispose();
+                    directionFiltered.Dispose();
+                    return true;
+                }
+
+                // Remove district rules if building rules exist
+                bool hasBuildingRules = false;
+                for (int i = 0; i < directionFiltered.Length; i++)
+                {
+                    if (!directionFiltered[i].IsFromDistrict)
+                    {
+                        hasBuildingRules = true;
+                        break;
+                    }
+                }
+
+                var finalRules = new NativeList<RuleData>(directionFiltered.Length, Allocator.Temp);
+                for (int i = 0; i < directionFiltered.Length; i++)
+                {
+                    if (!hasBuildingRules || !directionFiltered[i].IsFromDistrict)
+                    {
+                        finalRules.Add(directionFiltered[i]);
+                    }
+                }
+
+                bool result = EvaluateRulesJob(finalRules, homeBuilding, workplaceBuilding, homeDistrict, workplaceDistrict);
+
+                relevantRules.Dispose();
+                directionFiltered.Dispose();
+                finalRules.Dispose();
+
+                return result;
+            }
+
+            private static bool EvaluateRulesJob(NativeList<RuleData> rules, int homeBuilding, int workplaceBuilding,
+                Entity homeDistrict, Entity workplaceDistrict)
+            {
+                bool hasAllowRules = false;
+                bool hasMatchingAllowRule = false;
+                bool hasMatchingDisallowRule = false;
+
+                for (int i = 0; i < rules.Length; i++)
+                {
+                    var ruleData = rules[i];
+                    var rule = ruleData.Rule;
+
+                    int targetBuilding;
+                    Entity targetDistrict;
+
+                    if (rule.Type == (byte)ChainType.Outgoing)
+                    {
+                        targetBuilding = workplaceBuilding;
+                        targetDistrict = workplaceDistrict;
+                    }
+                    else
+                    {
+                        targetBuilding = homeBuilding;
+                        targetDistrict = homeDistrict;
+                    }
+
+                    bool isInList = ContainsBuilding(rule.Buildings, targetBuilding) ||
+                                    (targetDistrict != Entity.Null && ContainsDistrict(rule.Districts, targetDistrict.Index));
+
+                    if (rule.Allow == (byte)AllowType.Allow)
+                    {
+                        hasAllowRules = true;
+                        if (isInList)
+                        {
+                            hasMatchingAllowRule = true;
+                        }
+                    }
+                    else
+                    {
+                        if (isInList)
+                        {
+                            hasMatchingDisallowRule = true;
+                        }
+                    }
+                }
+
+                if (hasMatchingDisallowRule)
+                    return false;
+                if (hasAllowRules && !hasMatchingAllowRule)
+                    return false;
+                return true;
+            }
+
+            private static bool ContainsBuilding(NativeArray<int> buildings, int buildingId)
+            {
+                for (int i = 0; i < buildings.Length; i++)
+                {
+                    if (buildings[i] == buildingId)
+                        return true;
+                }
+                return false;
+            }
+
+            private static bool ContainsDistrict(NativeArray<int> districts, int districtId)
+            {
+                for (int i = 0; i < districts.Length; i++)
+                {
+                    if (districts[i] == districtId)
+                        return true;
+                }
+                return false;
+            }
+
+            private static Entity GetBuildingDistrictJob(Entity building, ComponentLookup<CurrentDistrict> currentDistrictLookup)
+            {
+                if (currentDistrictLookup.HasComponent(building))
+                {
+                    var currentDistrict = currentDistrictLookup[building];
+                    if (currentDistrict.m_District != Entity.Null)
+                    {
+                        return currentDistrict.m_District;
+                    }
+                }
+                return Entity.Null;
+            }
+        }
+
+        /// <summary>
+        /// Data structure for worker removal (can't remove directly in parallel job)
+        /// </summary>
+        private struct WorkerRemovalData
+        {
+            public Entity CitizenEntity;
+            public Entity WorkplaceEntity;
+        }
+
+        /// <summary>
+        /// Blittable rule data for job system
+        /// </summary>
+        private struct RuleData
+        {
+            public RuleBlittable Rule;
+            public bool IsFromDistrict;
+            public int SourceEntityId;
+        }
+
+        /// <summary>
+        /// Blittable version of ResourceChainRule for use in Burst-compiled jobs
+        /// </summary>
+        private struct RuleBlittable
+        {
+            public byte Type; // ChainType
+            public byte Allow; // AllowType
+            public byte TransportType; // TransportType
+            public NativeArray<int> Buildings;
+            public NativeArray<int> Districts;
+        }
+
+        /// <summary>
+        /// Blittable config data for job system
+        /// </summary>
+        private struct ConfigData
+        {
+            public NativeArray<RuleBlittable> Rules;
+        }
+
         private ResourceChainManagementSystem m_ResourceChainManagementSystem;
         private EntityQuery m_WorkerQuery;
         private EntityCommandBufferSystem m_EndFrameBarrier;
@@ -57,8 +396,134 @@ namespace ManageResourceChains.Systems
 
         protected override void OnUpdate()
         {
-            // Check existing workers and remove them from workplaces that violate rules
-            EnforceWorkerRestrictions();
+            // Schedule parallel job to check worker restrictions
+            var workersToRemove = new NativeQueue<WorkerRemovalData>(Allocator.TempJob);
+            
+            // Convert managed configs to native data structures for the job
+            var buildingConfigs = ConvertToNativeConfigs(m_ResourceChainManagementSystem.GetAllConfigurations());
+            var districtConfigs = ConvertToNativeConfigs(m_ResourceChainManagementSystem.GetAllDistrictConfigurations());
+
+            // Only proceed if there are rules to enforce
+            if (buildingConfigs.Count > 0 || districtConfigs.Count > 0)
+            {
+                var job = new CheckWorkerRestrictionsJob
+                {
+                    EntityType = GetEntityTypeHandle(),
+                    WorkerType = GetComponentTypeHandle<Worker>(true),
+                    HouseholdMemberType = GetComponentTypeHandle<HouseholdMember>(true),
+                    PropertyRenterLookup = GetComponentLookup<PropertyRenter>(true),
+                    CurrentDistrictLookup = GetComponentLookup<CurrentDistrict>(true),
+                    BuildingConfigs = buildingConfigs,
+                    DistrictConfigs = districtConfigs,
+                    WorkersToRemove = workersToRemove.AsParallelWriter()
+                };
+
+                // Schedule the job to run in parallel
+                Dependency = job.ScheduleParallel(m_WorkerQuery, Dependency);
+                Dependency.Complete(); // Must complete before we process removal queue
+
+                // Process removal queue on main thread (can't do structural changes in parallel)
+                ProcessWorkerRemovals(workersToRemove);
+            }
+
+            // Cleanup
+            DisposeNativeConfigs(buildingConfigs);
+            DisposeNativeConfigs(districtConfigs);
+            workersToRemove.Dispose();
+        }
+
+        /// <summary>
+        /// Process the queue of workers that need to be removed (must be done on main thread)
+        /// </summary>
+        private void ProcessWorkerRemovals(NativeQueue<WorkerRemovalData> workersToRemove)
+        {
+            var ecb = m_EndFrameBarrier.CreateCommandBuffer();
+            var employeeBufferLookup = GetBufferLookup<Employee>();
+
+            while (workersToRemove.TryDequeue(out var removal))
+            {
+                // Remove worker from the workplace's employee list
+                if (employeeBufferLookup.HasBuffer(removal.WorkplaceEntity))
+                {
+                    var employees = employeeBufferLookup[removal.WorkplaceEntity];
+                    for (int j = 0; j < employees.Length; j++)
+                    {
+                        if (employees[j].m_Worker == removal.CitizenEntity)
+                        {
+                            employees.RemoveAt(j);
+                            break;
+                        }
+                    }
+                }
+
+                // Remove Worker component from citizen
+                ecb.RemoveComponent<Worker>(removal.CitizenEntity);
+            }
+        }
+
+        /// <summary>
+        /// Convert managed configuration dictionary to native hash map for use in jobs
+        /// </summary>
+        private NativeHashMap<int, ConfigData> ConvertToNativeConfigs(Dictionary<int, BuildingConfiguration> configs)
+        {
+            if (configs == null || configs.Count == 0)
+                return new NativeHashMap<int, ConfigData>(0, Allocator.TempJob);
+
+            var nativeConfigs = new NativeHashMap<int, ConfigData>(configs.Count, Allocator.TempJob);
+
+            foreach (var kvp in configs)
+            {
+                var rules = new NativeArray<RuleBlittable>(kvp.Value.Rules.Count, Allocator.TempJob, NativeArrayOptions.UninitializedMemory);
+                
+                for (int i = 0; i < kvp.Value.Rules.Count; i++)
+                {
+                    var managedRule = kvp.Value.Rules[i];
+                    var buildings = new NativeArray<int>(managedRule.Buildings.Count, Allocator.TempJob, NativeArrayOptions.UninitializedMemory);
+                    var districts = new NativeArray<int>(managedRule.Districts.Count, Allocator.TempJob, NativeArrayOptions.UninitializedMemory);
+
+                    for (int j = 0; j < managedRule.Buildings.Count; j++)
+                        buildings[j] = managedRule.Buildings[j];
+                    for (int j = 0; j < managedRule.Districts.Count; j++)
+                        districts[j] = managedRule.Districts[j];
+
+                    rules[i] = new RuleBlittable
+                    {
+                        Type = (byte)managedRule.Type,
+                        Allow = (byte)managedRule.Allow,
+                        TransportType = (byte)managedRule.TransportType,
+                        Buildings = buildings,
+                        Districts = districts
+                    };
+                }
+
+                nativeConfigs[kvp.Key] = new ConfigData { Rules = rules };
+            }
+
+            return nativeConfigs;
+        }
+
+        /// <summary>
+        /// Dispose native config data structures
+        /// </summary>
+        private void DisposeNativeConfigs(NativeHashMap<int, ConfigData> configs)
+        {
+            if (!configs.IsCreated)
+                return;
+
+            foreach (var kvp in configs)
+            {
+                var configData = kvp.Value;
+                for (int i = 0; i < configData.Rules.Length; i++)
+                {
+                    if (configData.Rules[i].Buildings.IsCreated)
+                        configData.Rules[i].Buildings.Dispose();
+                    if (configData.Rules[i].Districts.IsCreated)
+                        configData.Rules[i].Districts.Dispose();
+                }
+                if (configData.Rules.IsCreated)
+                    configData.Rules.Dispose();
+            }
+            configs.Dispose();
         }
 
         /// <summary>
@@ -83,84 +548,6 @@ namespace ManageResourceChains.Systems
             return Entity.Null;
         }
 
-        /// <summary>
-        /// Actively enforces worker restrictions by removing workers from disallowed workplaces
-        /// </summary>
-        private void EnforceWorkerRestrictions()
-        {
-            var allConfigs = m_ResourceChainManagementSystem.GetAllConfigurations();
-            if (allConfigs == null || allConfigs.Count == 0)
-                return; // No rules to enforce
-
-            var ecb = m_EndFrameBarrier.CreateCommandBuffer();
-
-            // Get component lookups
-            var workerLookup = GetComponentLookup<Worker>(false);
-            var citizenLookup = GetComponentLookup<Citizen>(true);
-            var householdMemberLookup = GetComponentLookup<HouseholdMember>(true);
-            var propertyRenterLookup = GetComponentLookup<PropertyRenter>(true);
-            var buildingLookup = GetComponentLookup<Building>(true);
-            var employeeBufferLookup = GetBufferLookup<Employee>(false);
-            var currentDistrictLookup = GetComponentLookup<CurrentDistrict>(true);
-
-            // Iterate through all workers
-            var workers = m_WorkerQuery.ToEntityArray(Allocator.Temp);
-            var workerComponents = m_WorkerQuery.ToComponentDataArray<Worker>(Allocator.Temp);
-            var householdMembers = m_WorkerQuery.ToComponentDataArray<HouseholdMember>(Allocator.Temp);
-
-            for (int i = 0; i < workers.Length; i++)
-            {
-                Entity citizenEntity = workers[i];
-                Worker worker = workerComponents[i];
-                Entity workplace = worker.m_Workplace;
-
-                if (workplace == Entity.Null)
-                    continue;
-
-                // Get the citizen's home building (source of the worker)
-                Entity household = householdMembers[i].m_Household;
-                Entity homeBuilding = Entity.Null;
-
-                if (propertyRenterLookup.HasComponent(household))
-                {
-                    homeBuilding = propertyRenterLookup[household].m_Property;
-                }
-
-                if (homeBuilding == Entity.Null)
-                    continue; // Can't determine home, skip
-
-                // Check if this worker is allowed to work at the workplace based on rules
-                int homeId = homeBuilding.Index;
-                int workplaceId = workplace.Index;
-
-                bool isAllowed = IsWorkerTransportAllowed(homeId, workplaceId, TransportType.Workers, homeBuilding,
-                    workplace, currentDistrictLookup);
-
-                if (!isAllowed)
-                {
-                    // Remove worker from the workplace's employee list
-                    if (employeeBufferLookup.HasBuffer(workplace))
-                    {
-                        var employees = employeeBufferLookup[workplace];
-                        for (int j = 0; j < employees.Length; j++)
-                        {
-                            if (employees[j].m_Worker == citizenEntity)
-                            {
-                                employees.RemoveAt(j);
-                                break;
-                            }
-                        }
-                    }
-
-                    // Remove Worker component from citizen
-                    ecb.RemoveComponent<Worker>(citizenEntity);
-                }
-            }
-
-            workers.Dispose();
-            workerComponents.Dispose();
-            householdMembers.Dispose();
-        }
 
         /// <summary>
         /// Represents a rule with metadata about its source
