@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using Colossal.UI.Binding;
-using Game.Common;
 using Game.UI;
 using Game.Tools;
 using Unity.Entities;
@@ -23,26 +22,23 @@ namespace ManageResourceChains.Systems
         // Staging configurations for UI editing (not used by game logic until committed)
         private Dictionary<string, Data.BuildingConfiguration> _stagingConfigurations = new Dictionary<string, Data.BuildingConfiguration>();
         
+
         // Bindings
         private ValueBinding<string> _resourceChainConfigBinding;
         private ValueBinding<string> _districtConfigBinding;
         private ValueBinding<bool> _buildingPickerActiveBinding;
         private ValueBinding<bool> _districtPickerActiveBinding;
-        private ValueBinding<bool> _priorityPickerActiveBinding;
         private ValueBinding<string> _allDistrictsBinding;
         
         // Tool systems
         private BuildingPickerToolSystem _buildingPickerToolSystem;
         private DistrictPickerToolSystem _districtPickerToolSystem;
-        private PriorityPickerToolSystem _priorityPickerToolSystem;
         private ToolSystem _toolSystem;
         
         // State for tracking picker
         private string _currentRuleId;
         private int _currentEntityId;
         private Data.EntityType _currentEntityType;
-        private bool _isPickingDistricts; 
-        private bool _isPickingPriorities;
         
         protected override void OnCreate()
         {
@@ -52,7 +48,6 @@ namespace ManageResourceChains.Systems
             // Get tool systems
             _buildingPickerToolSystem = World.GetOrCreateSystemManaged<BuildingPickerToolSystem>();
             _districtPickerToolSystem = World.GetOrCreateSystemManaged<DistrictPickerToolSystem>();
-            _priorityPickerToolSystem = World.GetOrCreateSystemManaged<PriorityPickerToolSystem>();
             _toolSystem = World.GetOrCreateSystemManaged<ToolSystem>();
             
             // Add binding to send configuration data to UI
@@ -60,7 +55,6 @@ namespace ManageResourceChains.Systems
             AddBinding(_districtConfigBinding = new ValueBinding<string>("manageResourceChains", "districtConfig", "{}"));
             AddBinding(_buildingPickerActiveBinding = new ValueBinding<bool>("manageResourceChains", "buildingPickerActive", false));
             AddBinding(_districtPickerActiveBinding = new ValueBinding<bool>("manageResourceChains", "districtPickerActive", false));
-            AddBinding(_priorityPickerActiveBinding = new ValueBinding<bool>("manageResourceChains", "priorityPickerActive", false));
             
             // Add method bindings for UI to call
             AddBinding(new TriggerBinding<int>("manageResourceChains", "requestBuildingConfig", RequestBuildingConfig));
@@ -82,11 +76,6 @@ namespace ManageResourceChains.Systems
             AddBinding(new TriggerBinding("manageResourceChains", "confirmDistrictPicker", ConfirmDistrictPicker));
             AddBinding(new TriggerBinding("manageResourceChains", "cancelDistrictPicker", CancelDistrictPicker));
             
-            // Priority picker tool bindings
-            AddBinding(new TriggerBinding<int, string, bool>("manageResourceChains", "startPriorityPicker", StartPriorityPicker));
-            AddBinding(new TriggerBinding("manageResourceChains", "confirmPriorityPicker", ConfirmPriorityPicker));
-            AddBinding(new TriggerBinding("manageResourceChains", "cancelPriorityPicker", CancelPriorityPicker));
-            
             // Direct district management (no picker needed)
             AddBinding(new TriggerBinding<int, string, int>("manageResourceChains", "addDistrictToRule", AddDistrictToRule));
             AddBinding(new TriggerBinding("manageResourceChains", "requestAllDistricts", RequestAllDistricts));
@@ -98,7 +87,7 @@ namespace ManageResourceChains.Systems
 
         protected override void OnUpdate()
         {
-            // Nothing to update each frame
+            // Nothing to update each frame - configuration management is event-driven
         }
 
         #region Key Generation
@@ -201,10 +190,7 @@ namespace ManageResourceChains.Systems
                     config.BuildingEntityId = entityId; // Ensure ID is set correctly
                     _stagingConfigurations[key] = config;
                     
-                    // Force immediate update of transport preferences
-                    WorkerTransportPreferenceSystem.ForceUpdate = true;
-                    
-                    Mod.log.Info($"✓ Saved {entityTypeName} config to staging (not applied to game logic yet)");
+                    Mod.log.Info($"Config saved to staging for {entityTypeName} {entityId}");
                 }
             }
             catch (Exception ex)
@@ -214,7 +200,7 @@ namespace ManageResourceChains.Systems
         }
 
         /// <summary>
-        /// Save configuration for a building (wrapper for backward compatibility)
+        /// Save configuration for a building (UI binding adapter)
         /// </summary>
         private void SaveBuildingConfig(int buildingEntityId, string configJson)
         {
@@ -222,7 +208,7 @@ namespace ManageResourceChains.Systems
         }
 
         /// <summary>
-        /// Save configuration for a district (wrapper for backward compatibility)
+        /// Save configuration for a district (UI binding adapter)
         /// </summary>
         private void SaveDistrictConfig(int districtEntityId, string configJson)
         {
@@ -391,9 +377,6 @@ namespace ManageResourceChains.Systems
                 
                 // Save to disk
                 SaveConfigurations();
-                
-                // Force immediate update of transport preferences
-                WorkerTransportPreferenceSystem.ForceUpdate = true;
                 
                 Mod.log.Info("All configurations committed and saved successfully - game logic will now use updated rules");
             }
@@ -578,23 +561,7 @@ namespace ManageResourceChains.Systems
 
         #endregion
 
-        #region District Picker Tool
-
-        /// <summary>
-        /// Check if district picker is currently active
-        /// </summary>
-        public bool IsDistrictPickerActive()
-        {
-            return _isPickingDistricts;
-        }
-
-        /// <summary>
-        /// Check if priority picker is currently active
-        /// </summary>
-        public bool IsPriorityPickerActive()
-        {
-            return _isPickingPriorities;
-        }
+        #region District Picker
 
         /// <summary>
         /// Start district picker - Activate the tool to block context switching
@@ -604,13 +571,17 @@ namespace ManageResourceChains.Systems
             try
             {
                 _currentEntityType = isDistrict ? Data.EntityType.District : Data.EntityType.Building;
+                string entityTypeName = isDistrict ? "district" : "building";
+                Mod.log.Info($"Starting district picker for {entityTypeName} {entityId}, rule {ruleId}");
+                
                 _currentEntityId = entityId;
                 _currentRuleId = ruleId;
-                _isPickingDistricts = true;
                 
                 // Activate the tool - this blocks DefaultToolSystem and prevents context switching
                 _toolSystem.activeTool = _districtPickerToolSystem;
                 _districtPickerActiveBinding.Update(true);
+                
+                Mod.log.Info("District picker tool activated");
             }
             catch (Exception ex)
             {
@@ -626,12 +597,16 @@ namespace ManageResourceChains.Systems
             try
             {
                 int districtId = districtEntity.Index;
+                string entityTypeName = _currentEntityType == Data.EntityType.Building ? "building" : "district";
+                Mod.log.Info($"District {districtId} selected for {entityTypeName} {_currentEntityId}, updating staging");
+                
                 string key = GetConfigKey(_currentEntityId, _currentEntityType);
                 var configBinding = _currentEntityType == Data.EntityType.Building ? _resourceChainConfigBinding : _districtConfigBinding;
                 
                 // Ensure config exists for this entity in staging
                 if (!_stagingConfigurations.TryGetValue(key, out var config))
                 {
+                    Mod.log.Warn($"Staging config not found for {entityTypeName} {_currentEntityId}, this should not happen");
                     return;
                 }
                 
@@ -639,6 +614,7 @@ namespace ManageResourceChains.Systems
                 var rule = config.Rules.FirstOrDefault(r => r.Id == _currentRuleId);
                 if (rule == null)
                 {
+                    Mod.log.Warn($"Rule {_currentRuleId} not found in staging config for {entityTypeName} {_currentEntityId}");
                     return;
                 }
                 
@@ -646,10 +622,13 @@ namespace ManageResourceChains.Systems
                 if (!rule.Districts.Contains(districtId))
                 {
                     rule.Districts.Add(districtId);
+                    Mod.log.Info($"✓ Added district {districtId} to {entityTypeName} rule {_currentRuleId} in staging");
                     
                     // Send updated config to UI immediately
                     string json = JsonConvert.SerializeObject(config, Formatting.Indented);
                     configBinding.Update(json);
+                    
+                    Mod.log.Info($"UI updated with new district for {entityTypeName} (staging only, not applied to game logic)");
                 }
             }
             catch (Exception ex)
@@ -665,9 +644,12 @@ namespace ManageResourceChains.Systems
         {
             try
             {
+                Mod.log.Info("Confirming district picker selection");
+                
                 _districtPickerToolSystem.ConfirmSelection();
-                _isPickingDistricts = false;
                 _districtPickerActiveBinding.Update(false);
+                
+                Mod.log.Info("District picker confirmed (changes in staging, user must click 'Save All Changes')");
             }
             catch (Exception ex)
             {
@@ -682,9 +664,12 @@ namespace ManageResourceChains.Systems
         {
             try
             {
+                Mod.log.Info("Cancelling district picker");
+                
                 _districtPickerToolSystem.CancelSelection();
-                _isPickingDistricts = false;
                 _districtPickerActiveBinding.Update(false);
+                
+                Mod.log.Info("District picker cancelled");
             }
             catch (Exception ex)
             {
@@ -693,343 +678,7 @@ namespace ManageResourceChains.Systems
         }
 
         #endregion
-
-        #region Priority Picker Tool
-
-        /// <summary>
-        /// Start priority picker tool
-        /// </summary>
-        private void StartPriorityPicker(int entityId, string ruleId, bool isDistrict)
-        {
-            try
-            {
-                _currentEntityType = isDistrict ? Data.EntityType.District : Data.EntityType.Building;
-                Mod.log.Info($"Starting priority picker for {entityId}, rule {ruleId}");
-                
-                _currentEntityId = entityId;
-                _currentRuleId = ruleId;
-                _isPickingPriorities = true;
-                
-                // Activate the priority picker tool
-                _toolSystem.activeTool = _priorityPickerToolSystem;
-                _priorityPickerActiveBinding.Update(true);
-                
-                Mod.log.Info("Priority picker tool activated");
-            }
-            catch (Exception ex)
-            {
-                Mod.log.Error($"Error starting priority picker: {ex.Message}");
-            }
-        }
-
-        /// <summary>
-        /// Called when a transport entity is selected during picking mode
-        /// </summary>
-        public void OnPrioritySelected(Entity priorityEntity)
-        {
-            try
-            {
-                int entityId = priorityEntity.Index;
-                string key = GetConfigKey(_currentEntityId, _currentEntityType);
-                var configBinding = _currentEntityType == Data.EntityType.Building ? _resourceChainConfigBinding : _districtConfigBinding;
-                
-                // Ensure config exists for this entity in staging
-                if (!_stagingConfigurations.TryGetValue(key, out var config))
-                {
-                    return;
-                }
-                
-                // Find the rule
-                var rule = config.Rules.FirstOrDefault(r => r.Id == _currentRuleId);
-                if (rule == null)
-                {
-                    return;
-                }
-                
-                // Determine station type based on ECS components
-                Data.TransportStationType stationType = DetermineStationType(priorityEntity);
-                
-                // Add priority to the rule
-                var priority = new Data.TransportPriority
-                {
-                    Id = Guid.NewGuid().ToString(),
-                    StationEntity = entityId,
-                    StationType = stationType,
-                    Priority = 10 // Default priority
-                };
-                
-                rule.TransportPriorities.Add(priority);
-                Mod.log.Info($"✓ Added priority {stationType} (entity {entityId}) to rule {_currentRuleId} in staging");
-                
-                // Send updated config to UI
-                string json = JsonConvert.SerializeObject(config, Formatting.Indented);
-                configBinding.Update(json);
-            }
-            catch (Exception ex)
-            {
-                Mod.log.Error($"Error in OnPrioritySelected: {ex.Message}");
-            }
-        }
-
-        /// <summary>
-        /// Confirm priority picker selection
-        /// </summary>
-        public void ConfirmPriorityPicker()
-        {
-            try
-            {
-                _priorityPickerToolSystem.ConfirmSelection();
-                _isPickingPriorities = false;
-                _priorityPickerActiveBinding.Update(false);
-            }
-            catch (Exception ex)
-            {
-                Mod.log.Error($"Error confirming priority picker: {ex.Message}");
-            }
-        }
-
-        /// <summary>
-        /// Cancel priority picker selection
-        /// </summary>
-        public void CancelPriorityPicker()
-        {
-            try
-            {
-                _priorityPickerToolSystem.CancelSelection();
-                _isPickingPriorities = false;
-                _priorityPickerActiveBinding.Update(false);
-            }
-            catch (Exception ex)
-            {
-                Mod.log.Error($"Error cancelling priority picker: {ex.Message}");
-            }
-        }
         
-        /// <summary>
-        /// Determine the transport station type from an entity's components
-        /// </summary>
-        private Data.TransportStationType DetermineStationType(Entity entity)
-        {
-            try
-            {
-                // If it's a waypoint, check the connected stop's components or owner building
-                if (EntityManager.HasComponent<Game.Routes.Waypoint>(entity))
-                {
-                    // Check if waypoint has a Connected component (links to the actual stop)
-                    if (EntityManager.HasComponent<Game.Routes.Connected>(entity))
-                    {
-                        var connected = EntityManager.GetComponentData<Game.Routes.Connected>(entity);
-                        Entity stopEntity = connected.m_Connected;
-                        
-                        // Check the stop entity's type markers
-                        if (EntityManager.HasComponent<Game.Routes.TrainStop>(stopEntity))
-                            return Data.TransportStationType.TrainStation;
-                        if (EntityManager.HasComponent<Game.Routes.BusStop>(stopEntity))
-                            return Data.TransportStationType.BusStop;
-                        if (EntityManager.HasComponent<Game.Routes.TramStop>(stopEntity))
-                            return Data.TransportStationType.TramStop;
-                        if (EntityManager.HasComponent<Game.Routes.SubwayStop>(stopEntity))
-                            return Data.TransportStationType.SubwayStation;
-                        if (EntityManager.HasComponent<Game.Routes.FerryStop>(stopEntity))
-                            return Data.TransportStationType.FerryTerminal;
-                        if (EntityManager.HasComponent<Game.Routes.ShipStop>(stopEntity))
-                            return Data.TransportStationType.Port;
-                        if (EntityManager.HasComponent<Game.Routes.AirplaneStop>(stopEntity))
-                            return Data.TransportStationType.Airport;
-                        if (EntityManager.HasComponent<Game.Routes.TaxiStand>(stopEntity))
-                            return Data.TransportStationType.TaxiStand;
-                        
-                        // If stop doesn't have type marker, check if it has an owner building
-                        if (EntityManager.HasComponent<Owner>(stopEntity))
-                        {
-                            var owner = EntityManager.GetComponentData<Owner>(stopEntity);
-                            Entity ownerBuilding = owner.m_Owner;
-                            
-                            if (EntityManager.HasComponent<Game.Buildings.Building>(ownerBuilding))
-                            {
-                                // Recursively check the owner building
-                                return DetermineStationTypeFromBuilding(ownerBuilding);
-                            }
-                        }
-                    }
-                    
-                    // If waypoint has Owner, check the route's transport type
-                    if (EntityManager.HasComponent<Owner>(entity))
-                    {
-                        var waypointOwner = EntityManager.GetComponentData<Owner>(entity);
-                        var lineEntity = waypointOwner.m_Owner;
-                        
-                        if (EntityManager.HasComponent<Game.Prefabs.PrefabRef>(lineEntity))
-                        {
-                            var linePrefabRef = EntityManager.GetComponentData<Game.Prefabs.PrefabRef>(lineEntity);
-                            var linePrefab = linePrefabRef.m_Prefab;
-                            
-                            if (EntityManager.HasComponent<Game.Prefabs.TransportLineData>(linePrefab))
-                            {
-                                var transportLineData = EntityManager.GetComponentData<Game.Prefabs.TransportLineData>(linePrefab);
-                                var transportType = transportLineData.m_TransportType;
-                                
-                                // Map transport type to station type
-                                switch (transportType)
-                                {
-                                    case Game.Prefabs.TransportType.Train:
-                                        return Data.TransportStationType.TrainStation;
-                                    case Game.Prefabs.TransportType.Bus:
-                                        return Data.TransportStationType.BusStop;
-                                    case Game.Prefabs.TransportType.Subway:
-                                        return Data.TransportStationType.SubwayStation;
-                                    case Game.Prefabs.TransportType.Tram:
-                                        return Data.TransportStationType.TramStop;
-                                    case Game.Prefabs.TransportType.Ferry:
-                                        return Data.TransportStationType.FerryTerminal;
-                                    case Game.Prefabs.TransportType.Ship:
-                                        return Data.TransportStationType.Port;
-                                    case Game.Prefabs.TransportType.Airplane:
-                                        return Data.TransportStationType.Airport;
-                                    case Game.Prefabs.TransportType.Taxi:
-                                        return Data.TransportStationType.TaxiStand;
-                                }
-                            }
-                        }
-                    }
-                }
-                
-                // Check for specific stop component types directly on the entity (for non-waypoint stops)
-                if (EntityManager.HasComponent<Game.Routes.TaxiStand>(entity))
-                    return Data.TransportStationType.TaxiStand;
-                if (EntityManager.HasComponent<Game.Routes.BusStop>(entity))
-                    return Data.TransportStationType.BusStop;
-                if (EntityManager.HasComponent<Game.Routes.TramStop>(entity))
-                    return Data.TransportStationType.TramStop;
-                if (EntityManager.HasComponent<Game.Routes.TrainStop>(entity))
-                    return Data.TransportStationType.TrainStation;
-                if (EntityManager.HasComponent<Game.Routes.SubwayStop>(entity))
-                    return Data.TransportStationType.SubwayStation;
-                if (EntityManager.HasComponent<Game.Routes.FerryStop>(entity))
-                    return Data.TransportStationType.FerryTerminal;
-                if (EntityManager.HasComponent<Game.Routes.ShipStop>(entity))
-                    return Data.TransportStationType.Port;
-                if (EntityManager.HasComponent<Game.Routes.AirplaneStop>(entity))
-                    return Data.TransportStationType.Airport;
-                
-                // Check for building station types (for buildings)
-                if (EntityManager.HasComponent<Game.Buildings.Building>(entity))
-                    return DetermineStationTypeFromBuilding(entity);
-                
-                // Default fallback
-                return Data.TransportStationType.BusStop;
-            }
-            catch (Exception ex)
-            {
-                Mod.log.Error($"Error determining station type: {ex.Message}");
-                return Data.TransportStationType.BusStop;
-            }
-        }
-
-        /// <summary>
-        /// Determine station type specifically from a building entity
-        /// </summary>
-        private Data.TransportStationType DetermineStationTypeFromBuilding(Entity buildingEntity)
-        {
-            // Try to find a connected waypoint to determine transport type from the route
-            var waypointQuery = EntityManager.CreateEntityQuery(ComponentType.ReadOnly<Game.Routes.Waypoint>());
-            var waypoints = waypointQuery.ToEntityArray(Unity.Collections.Allocator.Temp);
-            
-            foreach (var waypoint in waypoints)
-            {
-                // Check if this waypoint is connected to a stop owned by the building
-                if (EntityManager.HasComponent<Game.Routes.Connected>(waypoint))
-                {
-                    var connected = EntityManager.GetComponentData<Game.Routes.Connected>(waypoint);
-                    var stopEntity = connected.m_Connected;
-                    
-                    if (EntityManager.HasComponent<Owner>(stopEntity))
-                    {
-                        var owner = EntityManager.GetComponentData<Owner>(stopEntity);
-                        if (owner.m_Owner == buildingEntity)
-                        {
-                            // Found a waypoint connected to this building, check the route's transport type
-                            if (EntityManager.HasComponent<Owner>(waypoint))
-                            {
-                                var waypointOwner = EntityManager.GetComponentData<Owner>(waypoint);
-                                var lineEntity = waypointOwner.m_Owner;
-                                
-                                if (EntityManager.HasComponent<Game.Prefabs.PrefabRef>(lineEntity))
-                                {
-                                    var linePrefabRef = EntityManager.GetComponentData<Game.Prefabs.PrefabRef>(lineEntity);
-                                    var linePrefab = linePrefabRef.m_Prefab;
-                                    
-                                    if (EntityManager.HasComponent<Game.Prefabs.TransportLineData>(linePrefab))
-                                    {
-                                        var transportLineData = EntityManager.GetComponentData<Game.Prefabs.TransportLineData>(linePrefab);
-                                        var transportType = transportLineData.m_TransportType;
-                                        
-                                        waypoints.Dispose();
-                                        
-                                        // Map transport type to station type
-                                        switch (transportType)
-                                        {
-                                            case Game.Prefabs.TransportType.Train:
-                                                return Data.TransportStationType.TrainStation;
-                                            case Game.Prefabs.TransportType.Bus:
-                                                return Data.TransportStationType.BusStation;
-                                            case Game.Prefabs.TransportType.Subway:
-                                                return Data.TransportStationType.SubwayStation;
-                                            case Game.Prefabs.TransportType.Tram:
-                                                return Data.TransportStationType.TramStation;
-                                            case Game.Prefabs.TransportType.Ferry:
-                                                return Data.TransportStationType.FerryTerminal;
-                                            case Game.Prefabs.TransportType.Ship:
-                                                return Data.TransportStationType.Port;
-                                            case Game.Prefabs.TransportType.Airplane:
-                                                return Data.TransportStationType.Airport;
-                                            default:
-                                                return Data.TransportStationType.BusStation;
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            
-            waypoints.Dispose();
-            
-            // Fallback: Check prefab data
-            if (EntityManager.HasComponent<Game.Prefabs.PrefabRef>(buildingEntity))
-            {
-                var prefabRef = EntityManager.GetComponentData<Game.Prefabs.PrefabRef>(buildingEntity);
-                var prefabEntity = prefabRef.m_Prefab;
-                
-                // Check for cargo transport station
-                if (EntityManager.HasComponent<Game.Prefabs.CargoTransportStationData>(prefabEntity))
-                    return Data.TransportStationType.CargoTerminal;
-                
-                // Check transport station data to determine type by refuel types
-                if (EntityManager.HasComponent<Game.Prefabs.TransportStationData>(prefabEntity))
-                {
-                    var stationData = EntityManager.GetComponentData<Game.Prefabs.TransportStationData>(prefabEntity);
-                    
-                    // Determine type based on what it refuels
-                    if (stationData.m_TrainRefuelTypes != Game.Vehicles.EnergyTypes.None)
-                        return Data.TransportStationType.TrainStation;
-                    if (stationData.m_AircraftRefuelTypes != Game.Vehicles.EnergyTypes.None)
-                        return Data.TransportStationType.Airport;
-                    if (stationData.m_WatercraftRefuelTypes != Game.Vehicles.EnergyTypes.None)
-                        return Data.TransportStationType.Port;
-                    if (stationData.m_CarRefuelTypes != Game.Vehicles.EnergyTypes.None)
-                        return Data.TransportStationType.BusStation;
-                }
-            }
-            
-            // Default for buildings
-            return Data.TransportStationType.BusStation;
-        }
-
-
-        #endregion
-
         #region Public API for Game Systems
 
         /// <summary>

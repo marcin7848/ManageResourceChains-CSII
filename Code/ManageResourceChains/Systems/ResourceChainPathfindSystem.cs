@@ -1,19 +1,13 @@
-﻿﻿using Game;
+﻿using System.Collections.Generic;
+using Game;
+using Game.Areas;
 using Game.Buildings;
 using Game.Citizens;
 using Game.Common;
 using Game.Companies;
-using Game.Economy;
-using Game.Pathfind;
-using Game.Simulation;
 using ManageResourceChains.Data;
-using System.Collections.Generic;
-using System.Linq;
-using Game.Areas;
 using Unity.Collections;
 using Unity.Entities;
-using Unity.Jobs;
-using UnityEngine;
 
 namespace ManageResourceChains.Systems
 {
@@ -38,15 +32,15 @@ namespace ManageResourceChains.Systems
         protected override void OnCreate()
         {
             base.OnCreate();
-            
+
             m_ResourceChainManagementSystem = World.GetOrCreateSystemManaged<ResourceChainManagementSystem>();
             m_EndFrameBarrier = World.GetOrCreateSystemManaged<EndFrameBarrier>();
-            
+
             // Query for all citizens who are workers
             m_WorkerQuery = GetEntityQuery(new EntityQueryDesc
             {
-                All = new[] 
-                { 
+                All = new[]
+                {
                     ComponentType.ReadWrite<Worker>(),
                     ComponentType.ReadOnly<Citizen>(),
                     ComponentType.ReadOnly<HouseholdMember>()
@@ -56,7 +50,7 @@ namespace ManageResourceChains.Systems
                     ComponentType.ReadOnly<Deleted>()
                 }
             });
-            
+
             Mod.log.Info($"{nameof(ResourceChainPathfindSystem)} created - Worker restriction enforcement enabled");
         }
 
@@ -75,7 +69,7 @@ namespace ManageResourceChains.Systems
             // Check if entity exists and has CurrentDistrict component
             if (!EntityManager.Exists(building))
                 return Entity.Null;
-            
+
             if (currentDistrictLookup.HasComponent(building))
             {
                 var currentDistrict = currentDistrictLookup[building];
@@ -84,7 +78,7 @@ namespace ManageResourceChains.Systems
                     return currentDistrict.m_District;
                 }
             }
-            
+
             return Entity.Null;
         }
 
@@ -98,7 +92,7 @@ namespace ManageResourceChains.Systems
                 return; // No rules to enforce
 
             var ecb = m_EndFrameBarrier.CreateCommandBuffer();
-            
+
             // Get component lookups
             var workerLookup = GetComponentLookup<Worker>(false);
             var citizenLookup = GetComponentLookup<Citizen>(true);
@@ -112,20 +106,20 @@ namespace ManageResourceChains.Systems
             var workers = m_WorkerQuery.ToEntityArray(Allocator.Temp);
             var workerComponents = m_WorkerQuery.ToComponentDataArray<Worker>(Allocator.Temp);
             var householdMembers = m_WorkerQuery.ToComponentDataArray<HouseholdMember>(Allocator.Temp);
-            
+
             for (int i = 0; i < workers.Length; i++)
             {
                 Entity citizenEntity = workers[i];
                 Worker worker = workerComponents[i];
                 Entity workplace = worker.m_Workplace;
-                
+
                 if (workplace == Entity.Null)
                     continue;
 
                 // Get the citizen's home building (source of the worker)
                 Entity household = householdMembers[i].m_Household;
                 Entity homeBuilding = Entity.Null;
-                
+
                 if (propertyRenterLookup.HasComponent(household))
                 {
                     homeBuilding = propertyRenterLookup[household].m_Property;
@@ -137,9 +131,10 @@ namespace ManageResourceChains.Systems
                 // Check if this worker is allowed to work at the workplace based on rules
                 int homeId = homeBuilding.Index;
                 int workplaceId = workplace.Index;
-                
-                bool isAllowed = IsWorkerTransportAllowed(homeId, workplaceId, TransportType.Workers, homeBuilding, workplace, currentDistrictLookup);
-                
+
+                bool isAllowed = IsWorkerTransportAllowed(homeId, workplaceId, TransportType.Workers, homeBuilding,
+                    workplace, currentDistrictLookup);
+
                 if (!isAllowed)
                 {
                     // Remove worker from the workplace's employee list
@@ -155,7 +150,7 @@ namespace ManageResourceChains.Systems
                             }
                         }
                     }
-                    
+
                     // Remove Worker component from citizen
                     ecb.RemoveComponent<Worker>(citizenEntity);
                 }
@@ -188,11 +183,11 @@ namespace ManageResourceChains.Systems
 
             // Get all building configurations
             var buildingConfigs = m_ResourceChainManagementSystem.GetAllConfigurations();
-            
+
             // Get all district configurations
             var districtConfigs = m_ResourceChainManagementSystem.GetAllDistrictConfigurations();
-            
-            if ((buildingConfigs == null || buildingConfigs.Count == 0) && 
+
+            if ((buildingConfigs == null || buildingConfigs.Count == 0) &&
                 (districtConfigs == null || districtConfigs.Count == 0))
             {
                 return true; // No rules, allow everything
@@ -219,8 +214,9 @@ namespace ManageResourceChains.Systems
                         {
                             // Check if workplace is directly in the buildings list OR in one of the listed districts
                             bool isInList = rule.Buildings.Contains(workplaceBuilding) ||
-                                          (workplaceDistrict != Entity.Null && rule.Districts.Contains(workplaceDistrict.Index));
-                            
+                                            (workplaceDistrict != Entity.Null &&
+                                             rule.Districts.Contains(workplaceDistrict.Index));
+
                             if (rule.Allow == AllowType.Disallow)
                             {
                                 // DISALLOW = Blacklist: Block if IN the list
@@ -244,8 +240,9 @@ namespace ManageResourceChains.Systems
                         {
                             // Check if home is directly in the buildings list OR in one of the listed districts
                             bool isInList = rule.Buildings.Contains(homeBuilding) ||
-                                          (homeDistrict != Entity.Null && rule.Districts.Contains(homeDistrict.Index));
-                            
+                                            (homeDistrict != Entity.Null &&
+                                             rule.Districts.Contains(homeDistrict.Index));
+
                             if (rule.Allow == AllowType.Disallow)
                             {
                                 // DISALLOW = Blacklist: Block if IN the list
@@ -271,7 +268,8 @@ namespace ManageResourceChains.Systems
             if (districtConfigs != null)
             {
                 // Check home district rules (OUTGOING)
-                if (homeDistrict != Entity.Null && districtConfigs.TryGetValue(homeDistrict.Index, out var homeDistrictConfig))
+                if (homeDistrict != Entity.Null &&
+                    districtConfigs.TryGetValue(homeDistrict.Index, out var homeDistrictConfig))
                 {
                     foreach (var rule in homeDistrictConfig.Rules)
                     {
@@ -284,8 +282,9 @@ namespace ManageResourceChains.Systems
                         {
                             // Check if workplace is directly in the buildings list OR in one of the listed districts
                             bool isInList = rule.Buildings.Contains(workplaceBuilding) ||
-                                          (workplaceDistrict != Entity.Null && rule.Districts.Contains(workplaceDistrict.Index));
-                            
+                                            (workplaceDistrict != Entity.Null &&
+                                             rule.Districts.Contains(workplaceDistrict.Index));
+
                             if (rule.Allow == AllowType.Disallow)
                             {
                                 // DISALLOW = Blacklist: Block if IN the list
@@ -307,7 +306,8 @@ namespace ManageResourceChains.Systems
                 }
 
                 // Check workplace district rules (INCOMING)
-                if (workplaceDistrict != Entity.Null && districtConfigs.TryGetValue(workplaceDistrict.Index, out var workplaceDistrictConfig))
+                if (workplaceDistrict != Entity.Null &&
+                    districtConfigs.TryGetValue(workplaceDistrict.Index, out var workplaceDistrictConfig))
                 {
                     foreach (var rule in workplaceDistrictConfig.Rules)
                     {
@@ -320,8 +320,9 @@ namespace ManageResourceChains.Systems
                         {
                             // Check if home is directly in the buildings list OR in one of the listed districts
                             bool isInList = rule.Buildings.Contains(homeBuilding) ||
-                                          (homeDistrict != Entity.Null && rule.Districts.Contains(homeDistrict.Index));
-                            
+                                            (homeDistrict != Entity.Null &&
+                                             rule.Districts.Contains(homeDistrict.Index));
+
                             if (rule.Allow == AllowType.Disallow)
                             {
                                 // DISALLOW = Blacklist: Block if IN the list
@@ -366,18 +367,18 @@ namespace ManageResourceChains.Systems
         {
             // Get all building configurations
             var buildingConfigs = m_ResourceChainManagementSystem.GetAllConfigurations();
-            
+
             // Get all district configurations
             var districtConfigs = m_ResourceChainManagementSystem.GetAllDistrictConfigurations();
-            
-            if ((buildingConfigs == null || buildingConfigs.Count == 0) && 
+
+            if ((buildingConfigs == null || buildingConfigs.Count == 0) &&
                 (districtConfigs == null || districtConfigs.Count == 0))
                 return true; // No rules, allow everything
 
             // Get districts for both buildings
             Entity sourceDistrict = GetBuildingDistrict(sourceEntity, currentDistrictLookup);
             Entity targetDistrict = GetBuildingDistrict(targetEntity, currentDistrictLookup);
-            
+
             // Check BUILDING-LEVEL rules first (they take priority)
             if (buildingConfigs != null)
             {
@@ -388,14 +389,15 @@ namespace ManageResourceChains.Systems
                         // Skip if not matching transport type
                         if (rule.TransportType != transportType)
                             continue;
-                        
+
                         // Check OUTGOING rules from SOURCE
                         if (rule.Type == ChainType.Outgoing && config.BuildingEntityId == sourceBuilding)
                         {
                             // Check if target is directly in the buildings list OR in one of the listed districts
                             bool isInList = rule.Buildings.Contains(targetBuilding) ||
-                                          (targetDistrict != Entity.Null && rule.Districts.Contains(targetDistrict.Index));
-                            
+                                            (targetDistrict != Entity.Null &&
+                                             rule.Districts.Contains(targetDistrict.Index));
+
                             if (rule.Allow == AllowType.Disallow)
                             {
                                 // DISALLOW = Blacklist: Block if IN the list
@@ -413,14 +415,15 @@ namespace ManageResourceChains.Systems
                                 }
                             }
                         }
-                        
+
                         // Check INCOMING rules to TARGET
                         if (rule.Type == ChainType.Incoming && config.BuildingEntityId == targetBuilding)
                         {
                             // Check if source is directly in the buildings list OR in one of the listed districts
                             bool isInList = rule.Buildings.Contains(sourceBuilding) ||
-                                          (sourceDistrict != Entity.Null && rule.Districts.Contains(sourceDistrict.Index));
-                            
+                                            (sourceDistrict != Entity.Null &&
+                                             rule.Districts.Contains(sourceDistrict.Index));
+
                             if (rule.Allow == AllowType.Disallow)
                             {
                                 // DISALLOW = Blacklist: Block if IN the list
@@ -446,7 +449,8 @@ namespace ManageResourceChains.Systems
             if (districtConfigs != null)
             {
                 // Check source district rules (OUTGOING)
-                if (sourceDistrict != Entity.Null && districtConfigs.TryGetValue(sourceDistrict.Index, out var sourceDistrictConfig))
+                if (sourceDistrict != Entity.Null &&
+                    districtConfigs.TryGetValue(sourceDistrict.Index, out var sourceDistrictConfig))
                 {
                     foreach (var rule in sourceDistrictConfig.Rules)
                     {
@@ -459,8 +463,9 @@ namespace ManageResourceChains.Systems
                         {
                             // Check if target is directly in the buildings list OR in one of the listed districts
                             bool isInList = rule.Buildings.Contains(targetBuilding) ||
-                                          (targetDistrict != Entity.Null && rule.Districts.Contains(targetDistrict.Index));
-                            
+                                            (targetDistrict != Entity.Null &&
+                                             rule.Districts.Contains(targetDistrict.Index));
+
                             if (rule.Allow == AllowType.Disallow)
                             {
                                 // DISALLOW = Blacklist: Block if IN the list
@@ -482,7 +487,8 @@ namespace ManageResourceChains.Systems
                 }
 
                 // Check target district rules (INCOMING)
-                if (targetDistrict != Entity.Null && districtConfigs.TryGetValue(targetDistrict.Index, out var targetDistrictConfig))
+                if (targetDistrict != Entity.Null &&
+                    districtConfigs.TryGetValue(targetDistrict.Index, out var targetDistrictConfig))
                 {
                     foreach (var rule in targetDistrictConfig.Rules)
                     {
@@ -495,8 +501,9 @@ namespace ManageResourceChains.Systems
                         {
                             // Check if source is directly in the buildings list OR in one of the listed districts
                             bool isInList = rule.Buildings.Contains(sourceBuilding) ||
-                                          (sourceDistrict != Entity.Null && rule.Districts.Contains(sourceDistrict.Index));
-                            
+                                            (sourceDistrict != Entity.Null &&
+                                             rule.Districts.Contains(sourceDistrict.Index));
+
                             if (rule.Allow == AllowType.Disallow)
                             {
                                 // DISALLOW = Blacklist: Block if IN the list
@@ -517,7 +524,7 @@ namespace ManageResourceChains.Systems
                     }
                 }
             }
-            
+
             // No blocking rules found, allow transport
             return true;
         }
@@ -525,11 +532,12 @@ namespace ManageResourceChains.Systems
         /// <summary>
         /// Get all rules that apply to a specific building and transport type
         /// </summary>
-        private List<ResourceChainRule> GetApplicableRules(int buildingEntity, TransportType transportType, bool isSource)
+        private List<ResourceChainRule> GetApplicableRules(int buildingEntity, TransportType transportType,
+            bool isSource)
         {
             var applicableRules = new List<ResourceChainRule>();
             var allConfigs = m_ResourceChainManagementSystem.GetAllConfigurations();
-            
+
             foreach (var config in allConfigs.Values)
             {
                 foreach (var rule in config.Rules)
@@ -537,14 +545,14 @@ namespace ManageResourceChains.Systems
                     // Check if this rule applies to this transport type
                     if (rule.TransportType != transportType)
                         continue;
-                    
+
                     // Check if this building is affected by the rule
                     if (rule.Buildings.Contains(buildingEntity))
                     {
                         // Check if the direction matches (source vs destination)
                         bool matchesDirection = (rule.Type == ChainType.Outgoing && isSource) ||
-                                              (rule.Type == ChainType.Incoming && !isSource);
-                        
+                                                (rule.Type == ChainType.Incoming && !isSource);
+
                         if (matchesDirection)
                         {
                             applicableRules.Add(rule);
@@ -552,7 +560,7 @@ namespace ManageResourceChains.Systems
                     }
                 }
             }
-            
+
             return applicableRules;
         }
 
@@ -563,14 +571,14 @@ namespace ManageResourceChains.Systems
         public float CalculatePathPenalty(int sourceBuilding, int targetBuilding, TransportType transportType,
             Entity sourceEntity, Entity targetEntity, ComponentLookup<CurrentDistrict> currentDistrictLookup)
         {
-            if (!IsTransportAllowed(sourceBuilding, targetBuilding, transportType, sourceEntity, targetEntity, currentDistrictLookup))
+            if (!IsTransportAllowed(sourceBuilding, targetBuilding, transportType, sourceEntity, targetEntity,
+                    currentDistrictLookup))
             {
                 // Return a very high penalty to effectively block the path
                 return 1000000f;
             }
-            
+
             return 0f;
         }
     }
 }
-

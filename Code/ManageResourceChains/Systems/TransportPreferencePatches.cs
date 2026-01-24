@@ -93,7 +93,7 @@ namespace ManageResourceChains.Systems
         /// </summary>
         private static void GetPathfindWeights_Postfix(ref PathfindWeights __result, Citizen citizen, Household household, int householdCitizens)
         {
-            var preference = TransportPreferenceSystem.DefaultPreference;
+            var preference = UtilityTransportPreferenceSystem.DefaultPreference;
             
             // Log every 100th call to avoid spam
             if (UnityEngine.Random.Range(0, 100) == 0)
@@ -101,19 +101,19 @@ namespace ManageResourceChains.Systems
                 Mod.log.Info($"GetPathfindWeights called - DefaultPreference: {preference}");
             }
             
-            if (preference == TransportPreferenceSystem.PreferredTransportMethod.None)
+            if (preference == UtilityTransportPreferenceSystem.PreferredTransportMethod.None)
                 return;
             
             float4 weights = __result.m_Value;
             float4 originalWeights = weights;
             
             // Public transport types (bus, train, tram, metro, ferry, airplane)
-            if (preference == TransportPreferenceSystem.PreferredTransportMethod.Bus ||
-                preference == TransportPreferenceSystem.PreferredTransportMethod.Train ||
-                preference == TransportPreferenceSystem.PreferredTransportMethod.Tram ||
-                preference == TransportPreferenceSystem.PreferredTransportMethod.Metro ||
-                preference == TransportPreferenceSystem.PreferredTransportMethod.Ferry ||
-                preference == TransportPreferenceSystem.PreferredTransportMethod.Airplane)
+            if (preference == UtilityTransportPreferenceSystem.PreferredTransportMethod.Bus ||
+                preference == UtilityTransportPreferenceSystem.PreferredTransportMethod.Train ||
+                preference == UtilityTransportPreferenceSystem.PreferredTransportMethod.Tram ||
+                preference == UtilityTransportPreferenceSystem.PreferredTransportMethod.Metro ||
+                preference == UtilityTransportPreferenceSystem.PreferredTransportMethod.Ferry ||
+                preference == UtilityTransportPreferenceSystem.PreferredTransportMethod.Airplane)
             {
                 // ULTRA-AGGRESSIVE public transport preference:
                 // 
@@ -143,26 +143,26 @@ namespace ManageResourceChains.Systems
                 // Comfort weight: 0.0001 (ignore comfort completely)
                 weights.w = 0.0001f;
             }
-            else if (preference == TransportPreferenceSystem.PreferredTransportMethod.Taxi)
+            else if (preference == UtilityTransportPreferenceSystem.PreferredTransportMethod.Taxi)
             {
                 // Taxi preference - don't care about cost
                 weights.z = 0.01f;
                 weights.w *= 0.5f;
             }
-            else if (preference == TransportPreferenceSystem.PreferredTransportMethod.Walking)
+            else if (preference == UtilityTransportPreferenceSystem.PreferredTransportMethod.Walking)
             {
                 // Walking preference - time matters less
                 weights.x = 0.01f;
                 weights.z = 0.01f;
             }
-            else if (preference == TransportPreferenceSystem.PreferredTransportMethod.Bicycle)
+            else if (preference == UtilityTransportPreferenceSystem.PreferredTransportMethod.Bicycle)
             {
                 // Bicycle preference
                 weights.x *= 0.3f;
                 weights.z *= 0.1f;
                 weights.w *= 0.5f;
             }
-            else if (preference == TransportPreferenceSystem.PreferredTransportMethod.Car)
+            else if (preference == UtilityTransportPreferenceSystem.PreferredTransportMethod.Car)
             {
                 // Car preference - don't care about parking/fuel cost
                 weights.x *= 0.5f; // Time still matters somewhat
@@ -185,18 +185,18 @@ namespace ManageResourceChains.Systems
         /// </summary>
         public static PathMethod GetRestrictedMethods(PathMethod originalMethods)
         {
-            var preference = TransportPreferenceSystem.DefaultPreference;
+            var preference = UtilityTransportPreferenceSystem.DefaultPreference;
             
-            if (preference == TransportPreferenceSystem.PreferredTransportMethod.None)
+            if (preference == UtilityTransportPreferenceSystem.PreferredTransportMethod.None)
                 return originalMethods;
             
             // Public transport preferences
-            if (preference == TransportPreferenceSystem.PreferredTransportMethod.Bus ||
-                preference == TransportPreferenceSystem.PreferredTransportMethod.Train ||
-                preference == TransportPreferenceSystem.PreferredTransportMethod.Tram ||
-                preference == TransportPreferenceSystem.PreferredTransportMethod.Metro ||
-                preference == TransportPreferenceSystem.PreferredTransportMethod.Ferry ||
-                preference == TransportPreferenceSystem.PreferredTransportMethod.Airplane)
+            if (preference == UtilityTransportPreferenceSystem.PreferredTransportMethod.Bus ||
+                preference == UtilityTransportPreferenceSystem.PreferredTransportMethod.Train ||
+                preference == UtilityTransportPreferenceSystem.PreferredTransportMethod.Tram ||
+                preference == UtilityTransportPreferenceSystem.PreferredTransportMethod.Metro ||
+                preference == UtilityTransportPreferenceSystem.PreferredTransportMethod.Ferry ||
+                preference == UtilityTransportPreferenceSystem.PreferredTransportMethod.Airplane)
             {
                 // Remove car-related methods
                 PathMethod restricted = originalMethods;
@@ -215,23 +215,23 @@ namespace ManageResourceChains.Systems
                 
                 return restricted;
             }
-            else if (preference == TransportPreferenceSystem.PreferredTransportMethod.Taxi)
+            else if (preference == UtilityTransportPreferenceSystem.PreferredTransportMethod.Taxi)
             {
                 // Remove everything except taxi and pedestrian
                 PathMethod restricted = PathMethod.Pedestrian | PathMethod.Taxi;
                 return restricted;
             }
-            else if (preference == TransportPreferenceSystem.PreferredTransportMethod.Walking)
+            else if (preference == UtilityTransportPreferenceSystem.PreferredTransportMethod.Walking)
             {
                 // Only pedestrian
                 return PathMethod.Pedestrian;
             }
-            else if (preference == TransportPreferenceSystem.PreferredTransportMethod.Bicycle)
+            else if (preference == UtilityTransportPreferenceSystem.PreferredTransportMethod.Bicycle)
             {
                 // Only bicycle and pedestrian
                 return PathMethod.Pedestrian | PathMethod.Bicycle | PathMethod.BicycleParking;
             }
-            else if (preference == TransportPreferenceSystem.PreferredTransportMethod.Car)
+            else if (preference == UtilityTransportPreferenceSystem.PreferredTransportMethod.Car)
             {
                 // Only car and pedestrian
                 return PathMethod.Pedestrian | PathMethod.Road | PathMethod.Parking;

@@ -54,7 +54,7 @@ namespace ManageResourceChains.Systems
         private delegate bool IsStopOfTypeDelegate(Entity stopEntity);
         
         // Track the last preference applied to avoid re-applying unnecessarily
-        private TransportPreferenceSystem.PreferredTransportMethod _lastAppliedPreference = TransportPreferenceSystem.PreferredTransportMethod.None;
+        private UtilityTransportPreferenceSystem.PreferredTransportMethod _lastAppliedPreference = UtilityTransportPreferenceSystem.PreferredTransportMethod.None;
         
         protected override void OnCreate()
         {
@@ -91,7 +91,7 @@ namespace ManageResourceChains.Systems
 
         protected override void OnUpdate()
         {
-            var preference = TransportPreferenceSystem.DefaultPreference;
+            var preference = UtilityTransportPreferenceSystem.DefaultPreference;
             
             // Check if preference changed or if we have transport lines now (and didn't apply modifications yet)
             bool preferenceChanged = preference != _lastAppliedPreference;
@@ -104,7 +104,7 @@ namespace ManageResourceChains.Systems
                 Mod.log.Info($"[TransportPriorityCostSystem] OnUpdate - DefaultPreference: {preference}, Lines: {transportLineCount}, PrevPref: {_lastAppliedPreference}");
             }
             
-            if (preference == TransportPreferenceSystem.PreferredTransportMethod.None)
+            if (preference == UtilityTransportPreferenceSystem.PreferredTransportMethod.None)
             {
                 if (_modificationsApplied)
                 {
@@ -124,59 +124,59 @@ namespace ManageResourceChains.Systems
                 // Apply preferences based on type
                 switch (preference)
                 {
-                    case TransportPreferenceSystem.PreferredTransportMethod.Bus:
+                    case UtilityTransportPreferenceSystem.PreferredTransportMethod.Bus:
                         Mod.log.Info("[TransportPriorityCostSystem] Making buses free and trains expensive");
                         ApplyPublicTransportPreference("Bus", IsBusLine, IsBusStop);
                         DisablePersonalVehicles();
                         break;
                         
-                    case TransportPreferenceSystem.PreferredTransportMethod.Train:
+                    case UtilityTransportPreferenceSystem.PreferredTransportMethod.Train:
                         Mod.log.Info("[TransportPriorityCostSystem] Making trains free and buses expensive");
                         ApplyPublicTransportPreference("Train", IsTrainLine, IsTrainStop);
                         DisablePersonalVehicles();
                         break;
                     
-                case TransportPreferenceSystem.PreferredTransportMethod.Tram:
+                case UtilityTransportPreferenceSystem.PreferredTransportMethod.Tram:
                     ApplyPublicTransportPreference("Tram", IsTramLine, IsTramStop);
                     DisablePersonalVehicles();
                     break;
                     
-                case TransportPreferenceSystem.PreferredTransportMethod.Metro:
+                case UtilityTransportPreferenceSystem.PreferredTransportMethod.Metro:
                     ApplyPublicTransportPreference("Metro", IsSubwayLine, IsSubwayStop);
                     DisablePersonalVehicles();
                     break;
                     
-                case TransportPreferenceSystem.PreferredTransportMethod.Ferry:
+                case UtilityTransportPreferenceSystem.PreferredTransportMethod.Ferry:
                     ApplyPublicTransportPreference("Ferry", IsShipLine, IsShipStop);
                     DisablePersonalVehicles();
                     break;
                     
-                case TransportPreferenceSystem.PreferredTransportMethod.Airplane:
+                case UtilityTransportPreferenceSystem.PreferredTransportMethod.Airplane:
                     ApplyPublicTransportPreference("Airplane", IsAirplaneLine, IsAirplaneStop);
                     DisablePersonalVehicles();
                     break;
                     
 
-                case TransportPreferenceSystem.PreferredTransportMethod.Taxi:
+                case UtilityTransportPreferenceSystem.PreferredTransportMethod.Taxi:
                     // Disable personal vehicles, make all public transport expensive
                     ApplyTaxiPreference();
                     DisablePersonalVehicles();
                     break;
                     
-                case TransportPreferenceSystem.PreferredTransportMethod.Walking:
+                case UtilityTransportPreferenceSystem.PreferredTransportMethod.Walking:
                     // Disable everything except walking
                     DisableAllPublicTransport();
                     DisablePersonalVehicles();
                     break;
                     
-                case TransportPreferenceSystem.PreferredTransportMethod.Bicycle:
+                case UtilityTransportPreferenceSystem.PreferredTransportMethod.Bicycle:
                     // Enable bicycles, disable everything else
                     DisableAllPublicTransport();
                     DisableCars();
                     EnableBicycles();
                     break;
                     
-                case TransportPreferenceSystem.PreferredTransportMethod.Car:
+                case UtilityTransportPreferenceSystem.PreferredTransportMethod.Car:
                     // Enable cars, disable everything else
                     DisableAllPublicTransport();
                     DisableBicycles();

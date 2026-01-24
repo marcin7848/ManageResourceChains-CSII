@@ -20,7 +20,7 @@ namespace ManageResourceChains.Systems
     /// By reducing the money weight and comfort weight, public transport becomes more attractive
     /// since it has low money cost and comfort is less penalized.
     /// </summary>
-    public partial class TransportPreferenceSystem : GameSystemBase
+    public partial class UtilityTransportPreferenceSystem : GameSystemBase
     {
         private SimulationSystem m_SimulationSystem;
         private EntityQuery m_PathfindingCitizenQuery;

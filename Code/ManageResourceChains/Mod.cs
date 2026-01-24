@@ -1,10 +1,9 @@
-﻿using Colossal.Logging;
+﻿using System;
+using Colossal.IO.AssetDatabase;
+using Colossal.Logging;
 using Game;
 using Game.Modding;
 using Game.SceneFlow;
-using Colossal.IO.AssetDatabase;
-using Game.Input;
-using UnityEngine;
 using ManageResourceChains.Systems;
 
 namespace ManageResourceChains
@@ -13,7 +12,7 @@ namespace ManageResourceChains
     {
         public static ILog log = LogManager.GetLogger($"{nameof(ManageResourceChains)}.{nameof(Mod)}")
             .SetShowsErrorsInUI(false);
-        
+
         public static ILog Log => log;
 
         // Input action constants for building picker tool
@@ -39,61 +38,51 @@ namespace ManageResourceChains
                 GameManager.instance.localizationManager.AddSource("en-US", new LocaleEN(m_Setting));
 
                 AssetDatabase.global.LoadSettings(nameof(ManageResourceChains), m_Setting, new Setting(this));
-                
+
                 // Register our UI systems
                 log.Info("Registering BuildingSelectionUISystem...");
                 updateSystem.UpdateAt<BuildingSelectionUISystem>(SystemUpdatePhase.UIUpdate);
                 log.Info("BuildingSelectionUISystem registered!");
-                
+
                 log.Info("Registering DistrictSelectionUISystem...");
                 updateSystem.UpdateAt<DistrictSelectionUISystem>(SystemUpdatePhase.UIUpdate);
                 log.Info("DistrictSelectionUISystem registered!");
-                
+
                 log.Info("Registering ResourceChainManagementSystem...");
                 updateSystem.UpdateAt<ResourceChainManagementSystem>(SystemUpdatePhase.UIUpdate);
                 log.Info("ResourceChainManagementSystem registered!");
-                
+
                 // Register pathfind system for worker restrictions
                 log.Info("Registering ResourceChainPathfindSystem...");
                 updateSystem.UpdateAt<ResourceChainPathfindSystem>(SystemUpdatePhase.GameSimulation);
                 log.Info("ResourceChainPathfindSystem registered!");
-                
+
                 // Register building picker tool
                 log.Info("Registering BuildingPickerToolSystem...");
                 updateSystem.UpdateAt<BuildingPickerToolSystem>(SystemUpdatePhase.ToolUpdate);
                 log.Info("BuildingPickerToolSystem registered!");
-                
+
                 // Register district picker tool
                 log.Info("Registering DistrictPickerToolSystem...");
                 updateSystem.UpdateAt<DistrictPickerToolSystem>(SystemUpdatePhase.ToolUpdate);
                 log.Info("DistrictPickerToolSystem registered!");
-                
-                // Register priority picker tool
-                log.Info("Registering PriorityPickerToolSystem...");
-                updateSystem.UpdateAt<PriorityPickerToolSystem>(SystemUpdatePhase.ToolUpdate);
-                log.Info("PriorityPickerToolSystem registered!");
-                
-                // Register transport priority cost system
-                log.Info("Registering TransportPriorityCostSystem...");
-                updateSystem.UpdateAt<TransportPriorityCostSystem>(SystemUpdatePhase.GameSimulation);
-                log.Info("TransportPriorityCostSystem registered!");
-                
-                // Register transport preference system
-                log.Info("Registering TransportPreferenceSystem...");
-                updateSystem.UpdateAt<TransportPreferenceSystem>(SystemUpdatePhase.GameSimulation);
-                log.Info("TransportPreferenceSystem registered!");
-                
-                // Register worker transport preference system (reads configurations and updates DefaultPreference)
-                log.Info("Registering WorkerTransportPreferenceSystem...");
-                updateSystem.UpdateAt<WorkerTransportPreferenceSystem>(SystemUpdatePhase.GameSimulation);
-                log.Info("WorkerTransportPreferenceSystem registered!");
-                
-                // Apply Harmony patches for transport preference
-                log.Info("Applying transport preference Harmony patches...");
-                TransportPreferencePatches.ApplyPatches();
-                log.Info("Transport preference patches applied!");
+
+                // // Register transport priority cost system
+                // log.Info("Registering TransportPriorityCostSystem...");
+                // updateSystem.UpdateAt<TransportPriorityCostSystem>(SystemUpdatePhase.GameSimulation);
+                // log.Info("TransportPriorityCostSystem registered!");
+                //
+                // // Register transport preference system
+                // log.Info("Registering TransportPreferenceSystem...");
+                // updateSystem.UpdateAt<UtilityTransportPreferenceSystem>(SystemUpdatePhase.GameSimulation);
+                // log.Info("TransportPreferenceSystem registered!");
+                //
+                // // Apply Harmony patches for transport preference
+                // log.Info("Applying transport preference Harmony patches...");
+                // TransportPreferencePatches.ApplyPatches();
+                // log.Info("Transport preference patches applied!");
             }
-            catch (System.Exception ex)
+            catch (Exception ex)
             {
                 log.Error($"Error in OnLoad: {ex.Message}");
                 log.Error($"Stack trace: {ex.StackTrace}");
@@ -103,11 +92,10 @@ namespace ManageResourceChains
         public void OnDispose()
         {
             log.Info(nameof(OnDispose));
-            
+
             // Remove Harmony patches
             TransportPreferencePatches.RemovePatches();
-            ForcePathfindBusPatches.RemovePatches();
-            
+
             if (m_Setting != null)
             {
                 m_Setting.UnregisterInOptionsUI();
