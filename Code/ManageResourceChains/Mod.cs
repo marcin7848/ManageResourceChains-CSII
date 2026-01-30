@@ -67,20 +67,11 @@ namespace ManageResourceChains
                 updateSystem.UpdateAt<DistrictPickerToolSystem>(SystemUpdatePhase.ToolUpdate);
                 log.Info("DistrictPickerToolSystem registered!");
 
-                // // Register transport priority cost system
-                // log.Info("Registering TransportPriorityCostSystem...");
-                // updateSystem.UpdateAt<TransportPriorityCostSystem>(SystemUpdatePhase.GameSimulation);
-                // log.Info("TransportPriorityCostSystem registered!");
-                //
-                // // Register transport preference system
-                // log.Info("Registering TransportPreferenceSystem...");
-                // updateSystem.UpdateAt<UtilityTransportPreferenceSystem>(SystemUpdatePhase.GameSimulation);
-                // log.Info("TransportPreferenceSystem registered!");
-                //
-                // // Apply Harmony patches for transport preference
-                // log.Info("Applying transport preference Harmony patches...");
-                // TransportPreferencePatches.ApplyPatches();
-                // log.Info("Transport preference patches applied!");
+                // Register trasnport preference system
+                log.Info("Registering TransportPreferenceSystem...");
+                updateSystem.UpdateAt<TransportPreferenceSystem>(SystemUpdatePhase.ToolUpdate);
+                log.Info("TransportPreferenceSystem registered!");
+                
             }
             catch (Exception ex)
             {
