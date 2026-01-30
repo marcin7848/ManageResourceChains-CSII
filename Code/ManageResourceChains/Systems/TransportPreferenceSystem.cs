@@ -34,7 +34,6 @@ namespace ManageResourceChains.Systems
             [ReadOnly] public ComponentTypeHandle<Worker> WorkerType;
             [ReadOnly] public ComponentTypeHandle<HouseholdMember> HouseholdMemberType;
             [ReadOnly] public ComponentTypeHandle<TravelPurpose> TravelPurposeType;
-            public ComponentTypeHandle<PathOwner> PathOwnerType;
 
             [ReadOnly] public ComponentLookup<PropertyRenter> PropertyRenterLookup;
             [ReadOnly] public ComponentLookup<CurrentDistrict> CurrentDistrictLookup;
@@ -43,6 +42,8 @@ namespace ManageResourceChains.Systems
 
             [ReadOnly] public NativeHashMap<int, TransportPreferenceData> BuildingPreferences;
             [ReadOnly] public NativeHashMap<int, TransportPreferenceData> DistrictPreferences;
+
+            public NativeQueue<TransportPreferenceLogData>.ParallelWriter LogQueue;
 
             public float TimeOfDay;
             public uint RandomSeed;
@@ -54,7 +55,6 @@ namespace ManageResourceChains.Systems
                 var workers = chunk.GetNativeArray(ref WorkerType);
                 var householdMembers = chunk.GetNativeArray(ref HouseholdMemberType);
                 var travelPurposes = chunk.GetNativeArray(ref TravelPurposeType);
-                var pathOwners = chunk.GetNativeArray(ref PathOwnerType);
 
                 for (int i = 0; i < entities.Length; i++)
                 {
@@ -96,10 +96,18 @@ namespace ManageResourceChains.Systems
                     var preference = GetTransportPreferenceForWorker(
                         homeId, workplaceId, homeDistrict, workplaceDistrict,
                         BuildingPreferences, DistrictPreferences, RandomSeed + (uint)citizenEntity.Index);
-
+                    
                     if (preference == PreferredTransport.None)
                         continue;
-
+                    
+                    // Only log when there's an actual preference
+                    LogQueue.Enqueue(new TransportPreferenceLogData
+                    {
+                        HomeEntityId = homeId,
+                        WorkplaceId = workplaceId,
+                        Preference = preference
+                    });
+                    
                     // Apply preference to pathfinding (would need PathOwner modifications)
                     // Note: PathOwner modifications are complex and may require different approach
                     // This is where we would modify the pathfinding parameters
@@ -211,6 +219,16 @@ namespace ManageResourceChains.Systems
         }
 
         /// <summary>
+        /// Logging data collected from Burst jobs for later processing
+        /// </summary>
+        private struct TransportPreferenceLogData
+        {
+            public int HomeEntityId;
+            public int WorkplaceId;
+            public PreferredTransport Preference;
+        }
+
+        /// <summary>
         /// Flags representing which transport types are enabled
         /// </summary>
         [Flags]
@@ -250,6 +268,10 @@ namespace ManageResourceChains.Systems
         private ResourceChainManagementSystem m_ResourceChainManagementSystem;
         private EntityQuery m_WorkerPathfindingQuery;
         private SimulationSystem m_SimulationSystem;
+        
+        // Track which workers we've already logged to avoid spam
+        private readonly HashSet<int> m_LoggedWorkers = new HashSet<int>();
+        private uint m_LastCleanupFrame = 0;
 
         public override int GetUpdateInterval(SystemUpdatePhase phase)
         {
@@ -265,16 +287,16 @@ namespace ManageResourceChains.Systems
             m_ResourceChainManagementSystem = World.GetOrCreateSystemManaged<ResourceChainManagementSystem>();
             m_SimulationSystem = World.GetOrCreateSystemManaged<SimulationSystem>();
 
-            // Query for citizens who are workers and currently pathfinding to work
+            // Query for citizens who are workers with TravelPurpose (actively traveling)
+            // Note: PathOwner may not always be present when pathfinding is requested
             m_WorkerPathfindingQuery = GetEntityQuery(new EntityQueryDesc
             {
                 All = new[]
                 {
-                    ComponentType.ReadWrite<Worker>(),
+                    ComponentType.ReadOnly<Worker>(),
                     ComponentType.ReadOnly<Citizen>(),
                     ComponentType.ReadOnly<HouseholdMember>(),
-                    ComponentType.ReadOnly<TravelPurpose>(),
-                    ComponentType.ReadWrite<PathOwner>()
+                    ComponentType.ReadOnly<TravelPurpose>()
                 },
                 None = new[]
                 {
@@ -292,10 +314,21 @@ namespace ManageResourceChains.Systems
                 m_ResourceChainManagementSystem.GetAllConfigurations());
             var districtPreferences = ConvertToNativePreferences(
                 m_ResourceChainManagementSystem.GetAllDistrictConfigurations());
-
+            
+            // Clean up logged workers tracking every 262144 frames (about every in-game day)
+            uint currentFrame = m_SimulationSystem.frameIndex;
+            if (currentFrame - m_LastCleanupFrame > 262144)
+            {
+                m_LoggedWorkers.Clear();
+                m_LastCleanupFrame = currentFrame;
+            }
+            
             // Only proceed if there are preferences to apply
             if (buildingPreferences.Count > 0 || districtPreferences.Count > 0)
             {
+                // Create a queue to collect logging data from the job
+                var logQueue = new NativeQueue<TransportPreferenceLogData>(Allocator.TempJob);
+
                 // Get current time of day for public transport availability
                 float timeOfDay = (float)(m_SimulationSystem.frameIndex % 262144) / 262144f;
 
@@ -305,13 +338,13 @@ namespace ManageResourceChains.Systems
                     WorkerType = GetComponentTypeHandle<Worker>(true),
                     HouseholdMemberType = GetComponentTypeHandle<HouseholdMember>(true),
                     TravelPurposeType = GetComponentTypeHandle<TravelPurpose>(true),
-                    PathOwnerType = GetComponentTypeHandle<PathOwner>(false),
                     PropertyRenterLookup = GetComponentLookup<PropertyRenter>(true),
                     CurrentDistrictLookup = GetComponentLookup<CurrentDistrict>(true),
                     HouseholdLookup = GetComponentLookup<Household>(true),
                     CitizenLookup = GetComponentLookup<Citizen>(true),
                     BuildingPreferences = buildingPreferences,
                     DistrictPreferences = districtPreferences,
+                    LogQueue = logQueue.AsParallelWriter(),
                     TimeOfDay = timeOfDay,
                     RandomSeed = (uint)m_SimulationSystem.frameIndex
                 };
@@ -319,6 +352,25 @@ namespace ManageResourceChains.Systems
                 // Schedule the job to run in parallel
                 Dependency = job.ScheduleParallel(m_WorkerPathfindingQuery, Dependency);
                 Dependency.Complete();
+
+                // Process logging data - only log if we haven't logged this worker before
+                int logCount = 0;
+                while (logQueue.TryDequeue(out var logData))
+                {
+                    // Create a unique key for this worker trip (home + workplace)
+                    // Simple hash: combine the two IDs
+                    int tripKey = (logData.HomeEntityId * 397) ^ logData.WorkplaceId;
+                    
+                    if (m_LoggedWorkers.Add(tripKey))
+                    {
+                        // Only log if this is the first time we see this worker trip
+                        LogTransportPreference(logData.HomeEntityId, logData.WorkplaceId, logData.Preference);
+                        logCount++;
+                    }
+                }
+
+                // Cleanup log queue
+                logQueue.Dispose();
             }
 
             // Cleanup
@@ -508,6 +560,15 @@ namespace ManageResourceChains.Systems
             }
 
             return methods;
+        }
+
+        /// <summary>
+        /// Logs transport preference application for debugging purposes.
+        /// Cannot be called from Burst jobs, so must be used separately.
+        /// </summary>
+        public static void LogTransportPreference(int homeEntityId, int workplaceId, PreferredTransport preference)
+        {
+            Mod.log.Info($"[TransportPreference] Home: {homeEntityId}, Workplace: {workplaceId}, Preference: {preference}");
         }
 
         /// <summary>
