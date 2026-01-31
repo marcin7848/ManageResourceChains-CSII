@@ -43,7 +43,7 @@ namespace ManageResourceChains.Systems
             [ReadOnly] public NativeHashMap<int, TransportPreferenceData> BuildingPreferences;
             [ReadOnly] public NativeHashMap<int, TransportPreferenceData> DistrictPreferences;
 
-            public NativeQueue<TransportPreferenceLogData>.ParallelWriter LogQueue;
+            public NativeQueue<WorkerTransportPreferenceData>.ParallelWriter PreferenceQueue;
 
             public float TimeOfDay;
             public uint RandomSeed;
@@ -100,9 +100,10 @@ namespace ManageResourceChains.Systems
                     if (preference == PreferredTransport.None)
                         continue;
                     
-                    // Only log when there's an actual preference
-                    LogQueue.Enqueue(new TransportPreferenceLogData
+                    // Enqueue this worker for transport preference application
+                    PreferenceQueue.Enqueue(new WorkerTransportPreferenceData
                     {
+                        CitizenEntity = citizenEntity,
                         HomeEntityId = homeId,
                         WorkplaceId = workplaceId,
                         Preference = preference
@@ -219,10 +220,11 @@ namespace ManageResourceChains.Systems
         }
 
         /// <summary>
-        /// Logging data collected from Burst jobs for later processing
+        /// Data for workers that need transport preference applied
         /// </summary>
-        private struct TransportPreferenceLogData
+        private struct WorkerTransportPreferenceData
         {
+            public Entity CitizenEntity;
             public int HomeEntityId;
             public int WorkplaceId;
             public PreferredTransport Preference;
@@ -269,6 +271,9 @@ namespace ManageResourceChains.Systems
         private EntityQuery m_WorkerPathfindingQuery;
         private SimulationSystem m_SimulationSystem;
         
+        // Track workers with active transport preferences
+        private Dictionary<Entity, PreferredTransport> m_WorkerPreferences = new Dictionary<Entity, PreferredTransport>();
+        
         // Track which workers we've already logged to avoid spam
         private readonly HashSet<int> m_LoggedWorkers = new HashSet<int>();
         private uint m_LastCleanupFrame = 0;
@@ -304,7 +309,19 @@ namespace ManageResourceChains.Systems
                 }
             });
 
+            // Apply Harmony patches to intercept pathfinding weight calculations
+            WorkerTransportPreferencePatches.ApplyPatches(this);
+
             Mod.log.Info($"{nameof(TransportPreferenceSystem)} created - Transport preference enforcement enabled");
+        }
+
+        protected override void OnDestroy()
+        {
+            base.OnDestroy();
+            
+            // Remove Harmony patches when system is destroyed
+            WorkerTransportPreferencePatches.RemovePatches();
+            Mod.log.Info($"{nameof(TransportPreferenceSystem)} destroyed - Patches removed");
         }
 
         protected override void OnUpdate()
@@ -320,14 +337,15 @@ namespace ManageResourceChains.Systems
             if (currentFrame - m_LastCleanupFrame > 262144)
             {
                 m_LoggedWorkers.Clear();
+                m_WorkerPreferences.Clear(); // Also clear worker preferences
                 m_LastCleanupFrame = currentFrame;
             }
             
             // Only proceed if there are preferences to apply
             if (buildingPreferences.Count > 0 || districtPreferences.Count > 0)
             {
-                // Create a queue to collect logging data from the job
-                var logQueue = new NativeQueue<TransportPreferenceLogData>(Allocator.TempJob);
+                // Create a queue to collect worker preference data from the job
+                var preferenceQueue = new NativeQueue<WorkerTransportPreferenceData>(Allocator.TempJob);
 
                 // Get current time of day for public transport availability
                 float timeOfDay = (float)(m_SimulationSystem.frameIndex % 262144) / 262144f;
@@ -344,7 +362,7 @@ namespace ManageResourceChains.Systems
                     CitizenLookup = GetComponentLookup<Citizen>(true),
                     BuildingPreferences = buildingPreferences,
                     DistrictPreferences = districtPreferences,
-                    LogQueue = logQueue.AsParallelWriter(),
+                    PreferenceQueue = preferenceQueue.AsParallelWriter(),
                     TimeOfDay = timeOfDay,
                     RandomSeed = (uint)m_SimulationSystem.frameIndex
                 };
@@ -353,24 +371,27 @@ namespace ManageResourceChains.Systems
                 Dependency = job.ScheduleParallel(m_WorkerPathfindingQuery, Dependency);
                 Dependency.Complete();
 
-                // Process logging data - only log if we haven't logged this worker before
-                int logCount = 0;
-                while (logQueue.TryDequeue(out var logData))
+                // Process worker preference data
+                int newPreferenceCount = 0;
+                while (preferenceQueue.TryDequeue(out var workerData))
                 {
-                    // Create a unique key for this worker trip (home + workplace)
-                    // Simple hash: combine the two IDs
-                    int tripKey = (logData.HomeEntityId * 397) ^ logData.WorkplaceId;
-                    
-                    if (m_LoggedWorkers.Add(tripKey))
+                    // Store the preference for this worker
+                    if (!m_WorkerPreferences.ContainsKey(workerData.CitizenEntity))
                     {
-                        // Only log if this is the first time we see this worker trip
-                        LogTransportPreference(logData.HomeEntityId, logData.WorkplaceId, logData.Preference);
-                        logCount++;
+                        m_WorkerPreferences[workerData.CitizenEntity] = workerData.Preference;
+                        newPreferenceCount++;
+                        
+                        // Create a unique key for logging (only log once per trip)
+                        int tripKey = (workerData.HomeEntityId * 397) ^ workerData.WorkplaceId;
+                        if (m_LoggedWorkers.Add(tripKey))
+                        {
+                            Mod.log.Info($"[TransportPreference] Home: {workerData.HomeEntityId}, Workplace: {workerData.WorkplaceId}, Preference: {workerData.Preference}");
+                        }
                     }
                 }
 
-                // Cleanup log queue
-                logQueue.Dispose();
+                // Cleanup preference queue
+                preferenceQueue.Dispose();
             }
 
             // Cleanup
@@ -563,12 +584,82 @@ namespace ManageResourceChains.Systems
         }
 
         /// <summary>
-        /// Logs transport preference application for debugging purposes.
-        /// Cannot be called from Burst jobs, so must be used separately.
+        /// Get the transport preference for a specific worker (citizen entity).
+        /// Called by Harmony patches to modify pathfinding weights.
         /// </summary>
-        public static void LogTransportPreference(int homeEntityId, int workplaceId, PreferredTransport preference)
+        public PreferredTransport GetWorkerPreference(Entity citizenEntity)
         {
-            Mod.log.Info($"[TransportPreference] Home: {homeEntityId}, Workplace: {workplaceId}, Preference: {preference}");
+            if (m_WorkerPreferences.TryGetValue(citizenEntity, out var preference))
+            {
+                return preference;
+            }
+            return PreferredTransport.None;
+        }
+
+        /// <summary>
+        /// Apply transport preference weight modifications to PathfindWeights.
+        /// This modifies the weights to heavily favor the preferred transport type.
+        ///
+        /// Weight components: (time, behaviour, money, comfort)
+        /// - time: how much we care about travel time
+        /// - behaviour: traffic rules, etc.
+        /// - money: ticket cost, fuel cost
+        /// - comfort: crowding, walking distance, etc.
+        /// </summary>
+        public static PathfindWeights ApplyPreferenceWeights(PathfindWeights originalWeights, PreferredTransport preference)
+        {
+            if (preference == PreferredTransport.None)
+                return originalWeights;
+
+            float4 weights = originalWeights.m_Value;
+
+            switch (preference)
+            {
+                case PreferredTransport.Bus:
+                case PreferredTransport.Train:
+                case PreferredTransport.Tram:
+                case PreferredTransport.Metro:
+                case PreferredTransport.Ferry:
+                case PreferredTransport.Airplane:
+                    // Public transport preference - make it extremely cheap
+                    // Time weight: near zero (don't care about time)
+                    weights.x = 0.0001f;
+                    // Behaviour weight: near zero
+                    weights.y = 0.001f;
+                    // Money weight: ASTRONOMICAL (makes expensive options prohibitive)
+                    weights.z = 10000f;
+                    // Comfort weight: near zero (accept crowding)
+                    weights.w = 0.0001f;
+                    break;
+
+                case PreferredTransport.Taxi:
+                    // Taxi preference - don't care about cost
+                    weights.z = 0.01f;
+                    weights.w *= 0.5f;
+                    break;
+
+                case PreferredTransport.Walking:
+                    // Walking preference - time and money don't matter
+                    weights.x = 0.01f;
+                    weights.z = 0.01f;
+                    break;
+
+                case PreferredTransport.Bicycle:
+                    // Bicycle preference
+                    weights.x *= 0.3f;
+                    weights.z *= 0.1f;
+                    weights.w *= 0.5f;
+                    break;
+
+                case PreferredTransport.Car:
+                    // Car preference - don't care about parking/fuel cost
+                    weights.x *= 0.5f;
+                    weights.z *= 0.1f;
+                    weights.w *= 0.5f;
+                    break;
+            }
+
+            return new PathfindWeights(weights.x, weights.y, weights.z, weights.w);
         }
 
         /// <summary>
@@ -712,3 +803,4 @@ namespace ManageResourceChains.Systems
         }
     }
 }
+
