@@ -1,4 +1,4 @@
-﻿using System;
+﻿﻿using System;
 using System.Collections.Generic;
 using Colossal.Serialization.Entities;
 using Unity.Entities;
@@ -19,7 +19,6 @@ namespace ManageResourceChains.Data
         public List<int> Buildings { get; set; } = new List<int>();
         public List<int> Districts { get; set; } = new List<int>();
         public List<TransportPriority> TransportPriorities { get; set; } = new List<TransportPriority>();
-        public TransportPreferences TransportPreferences { get; set; } = new TransportPreferences();
         
         // Additional granular filters
         public List<int> SpecificResources { get; set; } = new List<int>(); // Resource indices to filter (empty = all)
@@ -60,20 +59,6 @@ namespace ManageResourceChains.Data
         public int Priority { get; set; } = 1;
     }
 
-    [Serializable]
-    public class TransportPreferences
-    {
-        public bool Bus { get; set; } = false;
-        public bool Train { get; set; } = false;
-        public bool Tram { get; set; } = false;
-        public bool Metro { get; set; } = false;
-        public bool Ferry { get; set; } = false;
-        public bool Airplane { get; set; } = false;
-        public bool Taxi { get; set; } = false;
-        public bool Walking { get; set; } = false;
-        public bool Bicycle { get; set; } = false;
-        public bool Car { get; set; } = false;
-    }
 
     public enum ChainType
     {

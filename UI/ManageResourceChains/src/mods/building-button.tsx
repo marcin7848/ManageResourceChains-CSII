@@ -23,7 +23,6 @@ import {
     ChainType, 
     AllowType, 
     TransportType,
-    TransportPreferences,
     EntityType
 } from "./types";
 
@@ -109,14 +108,6 @@ const ResourceChainRuleComponent: React.FC<{
                 trigger("manageResourceChains", "startDistrictPicker", entityId, rule.id, isDistrict);
             }, 50);
         }
-    };
-    
-    const toggleTransportPreference = (transportType: keyof TransportPreferences) => {
-        const updatedPreferences = {
-            ...rule.transportPreferences,
-            [transportType]: !rule.transportPreferences[transportType]
-        };
-        onUpdate({ ...rule, transportPreferences: updatedPreferences });
     };
     
     return (
@@ -290,15 +281,13 @@ const ResourceChainRuleComponent: React.FC<{
                 </button>
             </div>
             
-            {/* Two-column layout below */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10rem' }}>
-                {/* Left column: Buildings/Districts */}
-                <div style={{ 
-                    padding: '8rem',
-                    backgroundColor: 'rgba(255,255,255,0.05)',
-                    borderRadius: '3rem',
-                    position: 'relative'
-                }}>
+            {/* Buildings/Districts Section */}
+            <div style={{ 
+                padding: '8rem',
+                backgroundColor: 'rgba(255,255,255,0.05)',
+                borderRadius: '3rem',
+                position: 'relative'
+            }}>
                     <div style={{ 
                         display: 'flex', 
                         justifyContent: 'space-between', 
@@ -442,73 +431,6 @@ const ResourceChainRuleComponent: React.FC<{
                         </div>
                     )}
                 </div>
-                
-                {/* Right column: Transport Preferences */}
-                <div style={{ 
-                    padding: '6rem',
-                    backgroundColor: 'rgba(255,255,255,0.05)',
-                    borderRadius: '3rem'
-                }}>
-                    <div style={{ 
-                        marginBottom: '4rem',
-                        fontSize: '11rem',
-                        fontWeight: 'bold'
-                    }}>
-                        <span>Transport Preferences</span>
-                    </div>
-                    
-                    {/* Transport preferences list with toggles */}
-                    {[
-                        { key: 'bus' as keyof TransportPreferences, label: 'Bus' },
-                        { key: 'train' as keyof TransportPreferences, label: 'Train' },
-                        { key: 'tram' as keyof TransportPreferences, label: 'Tram' },
-                        { key: 'metro' as keyof TransportPreferences, label: 'Metro' },
-                        { key: 'ferry' as keyof TransportPreferences, label: 'Ferry' },
-                        { key: 'airplane' as keyof TransportPreferences, label: 'Airplane' },
-                        { key: 'taxi' as keyof TransportPreferences, label: 'Taxi' },
-                        { key: 'walking' as keyof TransportPreferences, label: 'Walking' },
-                        { key: 'bicycle' as keyof TransportPreferences, label: 'Bicycle' },
-                        { key: 'car' as keyof TransportPreferences, label: 'Car' }
-                    ].map(({ key, label }) => (
-                        <div key={key} style={{ 
-                            display: 'flex', 
-                            justifyContent: 'space-between',
-                            alignItems: 'center',
-                            padding: '3rem 5rem',
-                            marginBottom: '2rem',
-                            backgroundColor: 'rgba(0,0,0,0.2)',
-                            borderRadius: '2rem',
-                            fontSize: '10rem'
-                        }}>
-                            <span>{label}</span>
-                            <button
-                                onClick={() => toggleTransportPreference(key)}
-                                style={{
-                                    backgroundColor: 'transparent',
-                                    border: 'none',
-                                    cursor: 'pointer',
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    justifyContent: 'center',
-                                    padding: '0'
-                                }}
-                                title={`Toggle ${label}`}
-                            >
-                                <img 
-                                    src={rule.transportPreferences[key] 
-                                        ? "coui://uil/Colored/ToggleRightOn.svg"
-                                        : "coui://uil/Colored/ToggleLeftOff.svg"}
-                                    style={{
-                                        width: '24rem',
-                                        height: '24rem'
-                                    }}
-                                    alt={rule.transportPreferences[key] ? 'Enabled' : 'Disabled'}
-                                />
-                            </button>
-                        </div>
-                    ))}
-                </div>
-            </div>
         </div>
     );
 };
@@ -584,7 +506,6 @@ const ManageResourceChainsPanel: React.FC<{
                         // Ensure all arrays exist
                         const buildings = r.Buildings || r.buildings;
                         const districts = r.Districts || r.districts;
-                        const transportPreferences = r.TransportPreferences || r.transportPreferences;
                         
                         return {
                             id: r.Id || r.id || Math.random().toString(36).substr(2, 9),
@@ -593,19 +514,7 @@ const ManageResourceChainsPanel: React.FC<{
                             allow: r.Allow ?? r.allow ?? AllowType.Allow,
                             transportType: r.TransportType ?? r.transportType ?? TransportType.Resources,
                             buildings: Array.isArray(buildings) ? buildings : [],
-                            districts: Array.isArray(districts) ? districts : [],
-                            transportPreferences: {
-                                bus: transportPreferences?.Bus ?? transportPreferences?.bus ?? false,
-                                train: transportPreferences?.Train ?? transportPreferences?.train ?? false,
-                                tram: transportPreferences?.Tram ?? transportPreferences?.tram ?? false,
-                                metro: transportPreferences?.Metro ?? transportPreferences?.metro ?? false,
-                                ferry: transportPreferences?.Ferry ?? transportPreferences?.ferry ?? false,
-                                airplane: transportPreferences?.Airplane ?? transportPreferences?.airplane ?? false,
-                                taxi: transportPreferences?.Taxi ?? transportPreferences?.taxi ?? false,
-                                walking: transportPreferences?.Walking ?? transportPreferences?.walking ?? false,
-                                bicycle: transportPreferences?.Bicycle ?? transportPreferences?.bicycle ?? false,
-                                car: transportPreferences?.Car ?? transportPreferences?.car ?? false
-                            }
+                            districts: Array.isArray(districts) ? districts : []
                         };
                     })
                 };
@@ -632,19 +541,7 @@ const ManageResourceChainsPanel: React.FC<{
             allow: AllowType.Allow,
             transportType: TransportType.Resources,
             buildings: [],
-            districts: [],
-            transportPreferences: {
-                bus: false,
-                train: false,
-                tram: false,
-                metro: false,
-                ferry: false,
-                airplane: false,
-                taxi: false,
-                walking: false,
-                bicycle: false,
-                car: false
-            }
+            districts: []
         };
 
         const currentConfig = config || {
@@ -846,9 +743,7 @@ const ManageResourceChainsPanel: React.FC<{
                                                 typeof rule.allow === 'number' &&
                                                 typeof rule.transportType === 'number' &&
                                                 Array.isArray(rule.buildings) &&
-                                                Array.isArray(rule.districts) &&
-                                                rule.transportPreferences &&
-                                                typeof rule.transportPreferences === 'object';
+                                                Array.isArray(rule.districts);
                                             
                                             if (!isValid) {
                                                 console.error("Invalid rule detected, skipping render:", rule);

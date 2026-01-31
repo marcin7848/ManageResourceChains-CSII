@@ -66,12 +66,6 @@ namespace ManageResourceChains
                 log.Info("Registering DistrictPickerToolSystem...");
                 updateSystem.UpdateAt<DistrictPickerToolSystem>(SystemUpdatePhase.ToolUpdate);
                 log.Info("DistrictPickerToolSystem registered!");
-
-                // Register trasnport preference system
-                log.Info("Registering TransportPreferenceSystem...");
-                updateSystem.UpdateAt<TransportPreferenceSystem>(SystemUpdatePhase.ToolUpdate);
-                log.Info("TransportPreferenceSystem registered!");
-                
             }
             catch (Exception ex)
             {
@@ -84,8 +78,6 @@ namespace ManageResourceChains
         {
             log.Info(nameof(OnDispose));
 
-            // Remove Harmony patches
-            TransportPreferencePatches.RemovePatches();
 
             if (m_Setting != null)
             {

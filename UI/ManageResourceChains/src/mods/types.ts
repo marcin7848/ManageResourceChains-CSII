@@ -35,19 +35,6 @@ export enum EntityType {
     District = 1
 }
 
-export interface TransportPreferences {
-    bus: boolean;
-    train: boolean;
-    tram: boolean;
-    metro: boolean;
-    ferry: boolean;
-    airplane: boolean;
-    taxi: boolean;
-    walking: boolean;
-    bicycle: boolean;
-    car: boolean;
-}
-
 export interface ResourceChainRule {
     id: string;
     color: string;
@@ -56,7 +43,6 @@ export interface ResourceChainRule {
     transportType: TransportType;
     buildings: number[];
     districts: number[];
-    transportPreferences: TransportPreferences; // Required field
 }
 
 export interface BuildingConfiguration {
