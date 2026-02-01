@@ -1,167 +1,1061 @@
-﻿import { useValue } from "cs2/api";
-import { bindValue } from "cs2/api";
-import { useEffect } from "react";
+﻿import React, { useState, useEffect } from "react";
+import ReactDOM from "react-dom";
+import { useValue } from "cs2/api";
+import { bindValue, trigger } from "cs2/api";
+import { getModule } from "cs2/modding";
+import { Dropdown, DropdownToggle, Panel, Scrollable } from "cs2/ui";
+import { Color } from "cs2/bindings";
+
+// Get the DescriptionTooltip component for proper tooltips
+const DescriptionTooltip = getModule("game-ui/common/tooltip/description-tooltip/description-tooltip.tsx", "DescriptionTooltip");
+
+// Get DropdownItem dynamically to avoid TypeScript type/value confusion
+// @ts-ignore
+const UI = require("cs2/ui");
+const DropdownItem = UI.DropdownItem || UI.DropdownItem$1;
+
+// Get the game's ColorField component (color picker with RGB sliders)
+const ColorFieldModule = getModule("game-ui/common/input/color-picker/color-field/color-field.tsx", "ColorField");
+const FOCUS_DISABLED = getModule("game-ui/common/focus/focus-key.ts", "FOCUS_DISABLED");
+import { 
+    ResourceChainRule, 
+    BuildingConfiguration, 
+    ChainType, 
+    AllowType, 
+    TransportType,
+    EntityType
+} from "./types";
+
+// Import game UI styles like CompanyBrandChanger does
+const styleDropdown = getModule("game-ui/menu/themes/dropdown.module.scss", "classes");
 
 // Bindings to our C# system
 const isBuildingSelected$ = bindValue<boolean>("manageResourceChains", "isBuildingSelected", false);
 const selectedBuildingEntity$ = bindValue<number>("manageResourceChains", "selectedBuildingEntity", 0);
+const resourceChainConfig$ = bindValue<string>("manageResourceChains", "resourceChainConfig", "{}");
+const buildingPickerActive$ = bindValue<boolean>("manageResourceChains", "buildingPickerActive", false);
+const districtPickerActive$ = bindValue<boolean>("manageResourceChains", "districtPickerActive", false);
 
+// District bindings
+const isDistrictSelected$ = bindValue<boolean>("manageResourceChains", "isDistrictSelected", false);
+const selectedDistrictEntity$ = bindValue<number>("manageResourceChains", "selectedDistrictEntity", 0);
+const districtConfig$ = bindValue<string>("manageResourceChains", "districtConfig", "{}");
+
+const BUTTON_CONTAINER_ID = 'manage-resource-chains-container';
+const DISTRICT_BUTTON_CONTAINER_ID = 'manage-resource-chains-district-container';
+const ACTIONS_SECTION_CLASS = '.actions-section_X1x';
+
+// Helper functions to convert between hex colors and Color objects
+function hexToColor(hex: string): Color {
+    // Remove # if present
+    hex = hex.replace('#', '');
+    
+    // Parse RGB values
+    const r = parseInt(hex.substring(0, 2), 16) / 255;
+    const g = parseInt(hex.substring(2, 4), 16) / 255;
+    const b = parseInt(hex.substring(4, 6), 16) / 255;
+    
+    return { r, g, b, a: 1 }; // Alpha always 1 for now
+}
+
+function colorToHex(color: Color): string {
+    const r = Math.round(color.r * 255).toString(16).padStart(2, '0');
+    const g = Math.round(color.g * 255).toString(16).padStart(2, '0');
+    const b = Math.round(color.b * 255).toString(16).padStart(2, '0');
+    return `#${r}${g}${b}`;
+}
+
+// Component with inline controls and two-column layout below
+const ResourceChainRuleComponent: React.FC<{
+    rule: ResourceChainRule;
+    entityId: number;
+    fullConfig: BuildingConfiguration; // Add full config
+    onUpdate: (rule: ResourceChainRule) => void;
+    onDelete: () => void;
+    isDistrict?: boolean;  // Optional: true if this is for a district
+}> = ({ rule, entityId, fullConfig, onUpdate, onDelete, isDistrict = false }) => {
+    const buildingPickerActive = useValue(buildingPickerActive$);
+    const districtPickerActive = useValue(districtPickerActive$);
+    const anyPickerActive = buildingPickerActive || districtPickerActive;
+    
+    const startBuildingPicker = () => {
+        // Only start picking if not already picking
+        if (!anyPickerActive) {
+            // Save current config to C# memory (not to disk) so the rule exists there
+            // This is required for OnBuildingSelected to work
+            const json = JSON.stringify(fullConfig);
+            const saveType = isDistrict ? "saveDistrictConfig" : "saveBuildingConfig";
+            trigger("manageResourceChains", saveType, entityId, json);
+            
+            // Small delay to ensure config is updated before starting picker
+            setTimeout(() => {
+                trigger("manageResourceChains", "startBuildingPicker", entityId, rule.id, isDistrict);
+            }, 50);
+        }
+    };
+    
+    const startDistrictPicker = () => {
+        // Only start picking if not already picking
+        if (!anyPickerActive) {
+            // Save current config to C# memory (not to disk) so the rule exists there
+            // This is required for OnDistrictSelected to work
+            const json = JSON.stringify(fullConfig);
+            const saveType = isDistrict ? "saveDistrictConfig" : "saveBuildingConfig";
+            trigger("manageResourceChains", saveType, entityId, json);
+            
+            // Small delay to ensure config is updated before starting picker
+            setTimeout(() => {
+                trigger("manageResourceChains", "startDistrictPicker", entityId, rule.id, isDistrict);
+            }, 50);
+        }
+    };
+    
+    return (
+        <div style={{ 
+            padding: '10rem', 
+            marginBottom: '10rem', 
+            border: '1px solid rgba(255,255,255,0.2)',
+            borderRadius: '4rem',
+            backgroundColor: 'rgba(0,0,0,0.2)'
+        }}>
+            {/* Top row: Color picker + 3 dropdowns + Delete button */}
+            <div style={{ 
+                display: 'flex', 
+                alignItems: 'center', 
+                gap: '12rem',
+                marginBottom: '10rem'
+            }}>
+                {/* Color picker with RGB sliders - square */}
+                <div style={{ 
+                    flexShrink: 0,
+                    width: '20rem',
+                    height: '20rem',
+                    overflow: 'hidden',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    marginRight: '4rem'
+                }}>
+                    <div style={{
+                        width: '20rem',
+                        height: '20rem'
+                    }}>
+                        <ColorFieldModule
+                            value={hexToColor(rule?.color || '#FF0000')}
+                            focusKey={FOCUS_DISABLED}
+                            onChange={(newColor: Color) => {
+                                onUpdate({ ...rule, color: colorToHex(newColor) });
+                            }}
+                            alpha={false}
+                        />
+                    </div>
+                </div>
+                
+                {/* Type Dropdown */}
+                <div style={{ flex: '1', minWidth: '100rem', marginRight: '4rem' }}>
+                    <Dropdown
+                        theme={styleDropdown}
+                        content={[
+                            <DropdownItem
+                                key="incoming"
+                                theme={styleDropdown}
+                                value={ChainType.Incoming}
+                                closeOnSelect={true}
+                                onChange={() => onUpdate({ ...rule, type: ChainType.Incoming })}
+                            >
+                                Incoming
+                            </DropdownItem>,
+                            <DropdownItem
+                                key="outgoing"
+                                theme={styleDropdown}
+                                value={ChainType.Outgoing}
+                                closeOnSelect={true}
+                                onChange={() => onUpdate({ ...rule, type: ChainType.Outgoing })}
+                            >
+                                Outgoing
+                            </DropdownItem>
+                        ]}
+                    >
+                        <DropdownToggle>
+                            {rule.type === ChainType.Incoming ? 'Incoming' : 'Outgoing'}
+                        </DropdownToggle>
+                    </Dropdown>
+                </div>
+                
+                {/* Allow Dropdown */}
+                <div style={{ flex: '1', minWidth: '90rem', marginRight: '4rem' }}>
+                    <Dropdown
+                        theme={styleDropdown}
+                        content={[
+                            <DropdownItem
+                                key="allow"
+                                theme={styleDropdown}
+                                value={AllowType.Allow}
+                                closeOnSelect={true}
+                                onChange={() => onUpdate({ ...rule, allow: AllowType.Allow })}
+                            >
+                                Allow
+                            </DropdownItem>,
+                            <DropdownItem
+                                key="disallow"
+                                theme={styleDropdown}
+                                value={AllowType.Disallow}
+                                closeOnSelect={true}
+                                onChange={() => onUpdate({ ...rule, allow: AllowType.Disallow })}
+                            >
+                                Disallow
+                            </DropdownItem>
+                        ]}
+                    >
+                        <DropdownToggle>
+                            {rule.allow === AllowType.Allow ? 'Allow' : 'Disallow'}
+                        </DropdownToggle>
+                    </Dropdown>
+                </div>
+                
+                {/* Transport Dropdown */}
+                <div style={{ flex: '1', minWidth: '100rem', marginRight: '4rem' }}>
+                    <Dropdown
+                        theme={styleDropdown}
+                        content={[
+                            <DropdownItem
+                                key="workers"
+                                theme={styleDropdown}
+                                value={TransportType.Workers}
+                                closeOnSelect={true}
+                                onChange={() => onUpdate({ ...rule, transportType: TransportType.Workers })}
+                            >
+                                Workers
+                            </DropdownItem>,
+                            <DropdownItem
+                                key="services"
+                                theme={styleDropdown}
+                                value={TransportType.Services}
+                                closeOnSelect={true}
+                                onChange={() => onUpdate({ ...rule, transportType: TransportType.Services })}
+                            >
+                                Services
+                            </DropdownItem>,
+                            <DropdownItem
+                                key="resources"
+                                theme={styleDropdown}
+                                value={TransportType.Resources}
+                                closeOnSelect={true}
+                                onChange={() => onUpdate({ ...rule, transportType: TransportType.Resources })}
+                            >
+                                Resources
+                            </DropdownItem>
+                        ]}
+                    >
+                        <DropdownToggle>
+                            {rule.transportType === TransportType.Workers ? 'Workers' :
+                             rule.transportType === TransportType.Services ? 'Services' :
+                             'Resources'}
+                        </DropdownToggle>
+                    </Dropdown>
+                </div>
+                
+                {/* Delete button with XClose icon */}
+                <button
+                    onClick={onDelete}
+                    style={{
+                        padding: '4rem',
+                        backgroundColor: 'transparent',
+                        border: 'none',
+                        cursor: 'pointer',
+                        flexShrink: 0,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center'
+                    }}
+                    title="Delete rule"
+                >
+                    <img
+                        src="coui://uil/Colored/XClose.svg"
+                        style={{
+                            width: '20rem',
+                            height: '20rem'
+                        }}
+                        alt="Delete"
+                    />
+                </button>
+            </div>
+            
+            {/* Buildings/Districts Section */}
+            <div style={{ 
+                padding: '8rem',
+                backgroundColor: 'rgba(255,255,255,0.05)',
+                borderRadius: '3rem',
+                position: 'relative'
+            }}>
+                    <div style={{ 
+                        display: 'flex', 
+                        justifyContent: 'space-between', 
+                        alignItems: 'center',
+                        marginBottom: '8rem',
+                        fontSize: '12rem',
+                        fontWeight: 'bold'
+                    }}>
+                        <span>Buildings / Districts</span>
+                        <div style={{ display: 'flex', gap: '8rem' }}>
+                            <button
+                                onClick={startBuildingPicker}
+                                disabled={anyPickerActive}
+                                style={{
+                                    padding: '2rem 6rem',
+                                    backgroundColor: buildingPickerActive ? 'rgba(255,165,0,0.5)' : 'rgba(0,150,255,0.3)',
+                                    border: `1px solid ${buildingPickerActive ? 'rgba(255,165,0,0.8)' : 'rgba(0,150,255,0.5)'}`,
+                                    borderRadius: '2rem',
+                                    color: 'white',
+                                    cursor: anyPickerActive ? 'not-allowed' : 'pointer',
+                                    fontSize: '10rem',
+                                    fontWeight: buildingPickerActive ? 'bold' : 'normal',
+                                    opacity: anyPickerActive ? 0.6 : 1
+                                }}
+                                title={buildingPickerActive ? 'Picking mode active - click on buildings in the game' : 'Click to start picking buildings'}
+                            >
+                                {buildingPickerActive ? '🎯 Picking...' : '+ Building'}
+                            </button>
+                            <button
+                                onClick={startDistrictPicker}
+                                disabled={anyPickerActive}
+                                style={{
+                                    padding: '2rem 6rem',
+                                    backgroundColor: districtPickerActive ? 'rgba(255,165,0,0.5)' : 'rgba(0,150,255,0.3)',
+                                    border: `1px solid ${districtPickerActive ? 'rgba(255,165,0,0.8)' : 'rgba(0,150,255,0.5)'}`,
+                                    borderRadius: '2rem',
+                                    color: 'white',
+                                    cursor: anyPickerActive ? 'not-allowed' : 'pointer',
+                                    fontSize: '10rem',
+                                    fontWeight: districtPickerActive ? 'bold' : 'normal',
+                                    opacity: anyPickerActive ? 0.6 : 1
+                                }}
+                                title={districtPickerActive ? 'Picking mode active - click on districts in the game' : 'Click to start picking districts'}
+                            >
+                                {districtPickerActive ? '🎯 Picking...' : '+ District'}
+                            </button>
+                        </div>
+                    </div>
+                    
+                    {/* Buildings list */}
+                    {rule.buildings?.length > 0 && rule.buildings.map((building, idx) => (
+                        <div key={idx} style={{ 
+                            display: 'flex', 
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            padding: '4rem',
+                            marginBottom: '4rem',
+                            backgroundColor: 'rgba(0,0,0,0.2)',
+                            borderRadius: '2rem',
+                            fontSize: '11rem'
+                        }}>
+                            <span>Building {building}</span>
+                            <button
+                                onClick={() => {
+                                    const updatedBuildings = rule.buildings.filter((b) => b !== building);
+                                    onUpdate({ ...rule, buildings: updatedBuildings });
+                                }}
+                                style={{
+                                    padding: '2rem 4rem',
+                                    backgroundColor: 'transparent',
+                                    border: 'none',
+                                    cursor: 'pointer',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center'
+                                }}
+                                title="Remove building"
+                            >
+                                <img 
+                                    src="coui://uil/Colored/XClose.svg"
+                                    style={{
+                                        width: '16rem',
+                                        height: '16rem'
+                                    }}
+                                    alt="Remove"
+                                />
+                            </button>
+                        </div>
+                    ))}
+                    
+                    {/* Districts list */}
+                    {rule.districts?.length > 0 && rule.districts.map((district, idx) => (
+                        <div key={idx} style={{ 
+                            display: 'flex', 
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            padding: '4rem',
+                            marginBottom: '4rem',
+                            backgroundColor: 'rgba(0,0,0,0.2)',
+                            borderRadius: '2rem',
+                            fontSize: '11rem'
+                        }}>
+                            <span>District {district}</span>
+                            <button
+                                onClick={() => {
+                                    const updatedDistricts = rule.districts.filter((d) => d !== district);
+                                    onUpdate({ ...rule, districts: updatedDistricts });
+                                }}
+                                style={{
+                                    padding: '2rem 4rem',
+                                    backgroundColor: 'transparent',
+                                    border: 'none',
+                                    cursor: 'pointer',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center'
+                                }}
+                                title="Remove district"
+                            >
+                                <img 
+                                    src="coui://uil/Colored/XClose.svg"
+                                    style={{
+                                        width: '16rem',
+                                        height: '16rem'
+                                    }}
+                                    alt="Remove"
+                                />
+                            </button>
+                        </div>
+                    ))}
+                    
+                    {(!rule.buildings || rule.buildings.length === 0) && 
+                     (!rule.districts || rule.districts.length === 0) && (
+                        <div style={{ 
+                            textAlign: 'center', 
+                            color: 'rgba(255,255,255,0.4)',
+                            fontSize: '10rem',
+                            padding: '8rem'
+                        }}>
+                            No buildings or districts added
+                        </div>
+                    )}
+                </div>
+        </div>
+    );
+};
+
+// Management panel component that appears on the right side
+// Uses proper game UI module classes like CompanyBrandChanger
+const ManageResourceChainsPanel: React.FC<{ 
+    entityId: number; 
+    onClose: () => void;
+    configBinding$?: any;  // Optional: use districtConfig$ for districts
+    isDistrict?: boolean;   // Optional: true if this is a district panel
+}> = ({ entityId, onClose, configBinding$ = resourceChainConfig$, isDistrict = false }) => {
+    const configJson = useValue(configBinding$) as string;
+    const buildingPickerActive = useValue(buildingPickerActive$);
+    const districtPickerActive = useValue(districtPickerActive$);
+    const anyPickerActive = buildingPickerActive || districtPickerActive;
+    const [config, setConfig] = useState<BuildingConfiguration | null>(null);
+    const [isLoading, setIsLoading] = useState<boolean>(true);
+    const [mountKey, setMountKey] = useState<number>(0);
+    
+    // Increment mount key on every mount to force config re-parse
+    useEffect(() => {
+        setMountKey(prev => prev + 1);
+    }, [entityId, isDistrict]);
+
+    // Handle Escape key to cancel pickers
+    useEffect(() => {
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if (e.key === 'Escape') {
+                if (districtPickerActive) {
+                    trigger("manageResourceChains", "cancelDistrictPicker");
+                    e.preventDefault();
+                    e.stopPropagation();
+                }
+            }
+        };
+        
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [districtPickerActive]);
+
+    useEffect(() => {
+        // Request config when entity changes
+        setIsLoading(true);
+        setConfig(null); // Clear previous config
+        const requestType = isDistrict ? "requestDistrictConfig" : "requestBuildingConfig";
+        trigger("manageResourceChains", requestType, entityId);
+    }, [entityId, isDistrict]);
+
+    useEffect(() => {
+        // Parse config when it updates
+        try {
+            if (configJson && configJson !== "{}" && configJson !== "null" && configJson !== '{"__loading__":true}') {
+                const parsed = JSON.parse(configJson);
+                
+                // Ensure Rules/rules is an array
+                const rulesArray = parsed.Rules || parsed.rules;
+                if (!Array.isArray(rulesArray)) {
+                    setConfig({
+                        buildingEntityId: entityId,
+                        type: isDistrict ? EntityType.District : EntityType.Building,
+                        rules: []
+                    });
+                    setIsLoading(false);
+                    return;
+                }
+                
+                // Convert camelCase from C# to match our types
+                const normalizedConfig: BuildingConfiguration = {
+                    buildingEntityId: parsed.BuildingEntityId || parsed.buildingEntityId || entityId,
+                    type: parsed.Type ?? parsed.type ?? (isDistrict ? EntityType.District : EntityType.Building),
+                    rules: rulesArray.map((r: any) => {
+                        // Ensure all arrays exist
+                        const buildings = r.Buildings || r.buildings;
+                        const districts = r.Districts || r.districts;
+                        
+                        return {
+                            id: r.Id || r.id || Math.random().toString(36).substr(2, 9),
+                            color: r.Color || r.color || '#FF0000',
+                            type: r.Type ?? r.type ?? ChainType.Incoming,
+                            allow: r.Allow ?? r.allow ?? AllowType.Allow,
+                            transportType: r.TransportType ?? r.transportType ?? TransportType.Resources,
+                            buildings: Array.isArray(buildings) ? buildings : [],
+                            districts: Array.isArray(districts) ? districts : []
+                        };
+                    })
+                };
+                
+                setConfig(normalizedConfig);
+                setIsLoading(false);
+            }
+        } catch (error) {
+            console.error("Error parsing config:", error);
+            setConfig({
+                buildingEntityId: entityId,
+                type: isDistrict ? EntityType.District : EntityType.Building,
+                rules: []
+            });
+            setIsLoading(false);
+        }
+    }, [configJson, entityId, isDistrict, mountKey]);
+
+    const addNewRule = () => {
+        const newRule: ResourceChainRule = {
+            id: Math.random().toString(36).substr(2, 9),
+            color: '#' + Math.floor(Math.random()*16777215).toString(16),
+            type: ChainType.Incoming,
+            allow: AllowType.Allow,
+            transportType: TransportType.Resources,
+            buildings: [],
+            districts: []
+        };
+
+        const currentConfig = config || {
+            buildingEntityId: entityId,
+            type: isDistrict ? EntityType.District : EntityType.Building,
+            rules: []
+        };
+        
+        // Ensure rules is an array
+        const currentRules = Array.isArray(currentConfig.rules) ? currentConfig.rules : [];
+
+        const newConfig: BuildingConfiguration = {
+            buildingEntityId: currentConfig.buildingEntityId,
+            type: currentConfig.type,
+            rules: [...currentRules, newRule]
+        };
+        
+        setConfig(newConfig);
+    };
+
+    const updateRule = (ruleId: string, updatedRule: ResourceChainRule) => {
+        if (!config || !Array.isArray(config.rules)) {
+            return;
+        }
+        
+        const newConfig = {
+            ...config,
+            rules: config.rules.map(r => r.id === ruleId ? updatedRule : r)
+        };
+        
+        setConfig(newConfig);
+        
+        // Auto-save to backend when rule is updated
+        try {
+            const json = JSON.stringify(newConfig);
+            const saveType = isDistrict ? "saveDistrictConfig" : "saveBuildingConfig";
+            trigger("manageResourceChains", saveType, entityId, json);
+            
+            // Also trigger disk save
+            setTimeout(() => {
+                trigger("manageResourceChains", "saveAllConfigurations");
+            }, 50);
+        } catch (error) {
+            console.error("Error auto-saving config:", error);
+        }
+    };
+
+    const deleteRule = (ruleId: string) => {
+        if (!config || !Array.isArray(config.rules)) return;
+        
+        const newConfig = {
+            ...config,
+            rules: config.rules.filter(r => r.id !== ruleId)
+        };
+        setConfig(newConfig);
+    };
+
+    const saveAllConfig = () => {
+        if (!config) return;
+        
+        try {
+            // First, save current config to memory (not disk)
+            const json = JSON.stringify(config);
+            console.log("Saving all config:", json); // Debug log
+            const saveType = isDistrict ? "saveDistrictConfig" : "saveBuildingConfig";
+            trigger("manageResourceChains", saveType, entityId, json);
+            
+            // Then trigger disk save for all configurations
+            setTimeout(() => {
+                trigger("manageResourceChains", "saveAllConfigurations");
+                
+                // Close the panel after saving
+                setTimeout(() => {
+                    onClose();
+                }, 100); // Small delay to ensure save is triggered
+            }, 50); // Small delay to ensure config is updated in memory first
+        } catch (error) {
+            console.error("Error saving config:", error);
+        }
+    };
+
+
+    return (
+        <>
+            <Panel
+                header={(
+                    <div style={{ display: 'flex', alignItems: 'center', padding: '0 10rem' }}>
+                        <img
+                            style={{ width: '24rem', height: '24rem', marginRight: '8rem' }}
+                            src="coui://uil/Colored/DeliveryVan.svg"
+                            alt="Manage Resource Chains"
+                        />
+                        <span>Manage Resource Chains</span>
+                    </div>
+                )}
+                onClose={onClose}
+                className="manage-resource-chains-panel"
+                style={{
+                    position: 'absolute',
+                    top: 'calc(16rem + var(--floatingToggleSize))',
+                    right: '20rem',
+                    width: '450rem',
+                    maxHeight: 'calc(100vh - 100rem)',
+                    opacity: anyPickerActive ? 0.7 : 1,
+                    backgroundColor: anyPickerActive ? 'rgba(0,0,0,0.6)' : undefined
+                }}
+                onClick={(e) => {
+                    // Handle clicks on the panel to finish picking mode
+                    if (buildingPickerActive) {
+                        trigger("manageResourceChains", "confirmBuildingPicker");
+                        e.stopPropagation(); // Prevent event from bubbling
+                    } else if (districtPickerActive) {
+                        trigger("manageResourceChains", "confirmDistrictPicker");
+                        e.stopPropagation(); // Prevent event from bubbling
+                    }
+                }}
+            >
+                {/* Overlay message when picking - inside Panel but above content */}
+                {anyPickerActive && (
+                    <div style={{
+                        position: 'absolute',
+                        top: '0',
+                        left: '0',
+                        right: '0',
+                        padding: '20rem 10rem',
+                        backgroundColor: 'rgba(255, 165, 0, 0.95)',
+                        color: 'white',
+                        textAlign: 'center',
+                        fontSize: '18rem',
+                        fontWeight: 'bold',
+                        zIndex: 10000,
+                        borderRadius: '8rem 8rem 0 0',
+                        boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
+                        pointerEvents: 'none',
+                        cursor: 'pointer'
+                    }}>
+                        {buildingPickerActive && 'Click anywhere on the panel to finish picking buildings'}
+                        {districtPickerActive && 'Click anywhere on the panel to finish picking districts'}
+                    </div>
+                )}
+                
+                <div style={{ 
+                    paddingTop: anyPickerActive ? '60rem' : '0', // Add padding when overlay is visible
+                    transition: 'padding-top 0.2s ease'
+                }}>
+                    <Scrollable>
+                    {isLoading ? (
+                        <div style={{ padding: '20rem', textAlign: 'center', color: 'rgba(255,255,255,0.7)' }}>
+                            Loading configuration...
+                        </div>
+                    ) : (
+                        <div>
+                            {/* Basic info section */}
+                            <div style={{ padding: '10rem', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '5rem' }}>
+                                    <span style={{ color: 'rgba(255,255,255,0.7)' }}>Entity ID:</span>
+                                    <span>{entityId.toString()}</span>
+                                </div>
+                                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                    <span style={{ color: 'rgba(255,255,255,0.7)' }}>Status:</span>
+                                    <span>Active</span>
+                                </div>
+                            </div>
+                            
+                            {/* Rules section */}
+                            <div style={{ padding: '10rem' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10rem' }}>
+                                    <strong>Resource Chain Rules</strong>
+                                    <button 
+                                        onClick={addNewRule}
+                                        style={{ 
+                                            padding: '5rem 15rem',
+                                            backgroundColor: 'rgba(0, 150, 255, 0.5)',
+                                            border: '1px solid rgba(0, 150, 255, 0.8)',
+                                            borderRadius: '4rem',
+                                            color: 'white',
+                                            cursor: 'pointer',
+                                            fontSize: '14rem',
+                                            fontWeight: 'bold'
+                                        }}
+                                    >
+                                        + Add New Rule
+                                    </button>
+                                </div>
+                                
+                                {config && Array.isArray(config.rules) && config.rules.length === 0 && (
+                                    <div style={{ padding: '20rem', textAlign: 'center', color: 'rgba(255,255,255,0.5)' }}>
+                                        No rules configured. Click "Add New Rule" to create one.
+                                    </div>
+                                )}
+                                
+                                {config && Array.isArray(config.rules) && config.rules.length > 0 && (
+                                    <div key={`rules-container-${config.rules.length}`}>
+                                        {config.rules.map((rule, index) => {
+                                            const isValid = rule && 
+                                                rule.id &&
+                                                rule.color &&
+                                                typeof rule.type === 'number' &&
+                                                typeof rule.allow === 'number' &&
+                                                typeof rule.transportType === 'number' &&
+                                                Array.isArray(rule.buildings) &&
+                                                Array.isArray(rule.districts);
+                                            
+                                            if (!isValid) {
+                                                console.error("Invalid rule detected, skipping render:", rule);
+                                                return null;
+                                            }
+                                            
+                                            return (
+                                                <ResourceChainRuleComponent
+                                                    key={`${rule.id}-${index}`}
+                                                    rule={rule}
+                                                    entityId={entityId}
+                                                    fullConfig={config}
+                                                    onUpdate={(updatedRule) => updateRule(rule.id, updatedRule)}
+                                                    onDelete={() => deleteRule(rule.id)}
+                                                    isDistrict={isDistrict}
+                                                />
+                                            );
+                                        })}
+                                    </div>
+                                )}
+                                
+                                {/* Save All Changes button - always visible */}
+                                <div style={{ padding: '10rem', display: 'flex', justifyContent: 'center', marginTop: '10rem' }}>
+                                    <button 
+                                        onClick={saveAllConfig}
+                                        style={{ 
+                                            padding: '8rem 40rem',
+                                            backgroundColor: 'rgba(0, 200, 0, 0.6)',
+                                            border: '2px solid rgba(0, 255, 0, 0.8)',
+                                            borderRadius: '4rem',
+                                            color: 'white',
+                                            cursor: 'pointer',
+                                            fontSize: '16rem',
+                                            fontWeight: 'bold',
+                                            boxShadow: '0 2px 8px rgba(0,0,0,0.3)'
+                                        }}
+                                    >
+                                        Save All Changes
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                    </Scrollable>
+                </div>
+            </Panel>
+        </>
+    );
+};
+
+// The actual button component using React/JSX (like FirstPersonCamera)
+const ManageResourceChainsButton: React.FC<{ onOpenPanel: () => void }> = ({ onOpenPanel }) => {
+    return (
+        <DescriptionTooltip title="Manage Resource Chains" description="Configure worker, service, and resource transport rules for this building">
+            <button
+                style={{ marginLeft: '6rem', marginRight: '8rem' }}
+                className="button_Z9O button_ECf item_It6 item-mouse-states_Fmi item-selected_tAM item-focused_FuT button_xGY"
+                onClick={onOpenPanel}
+            >
+                <img 
+                    className="icon_Tdt icon_soN icon_Iwk" 
+                    src="coui://uil/Colored/DeliveryVan.svg"
+                    alt="Manage Resource Chains"
+                />
+            </button>
+        </DescriptionTooltip>
+    );
+};
+
+// Main component that handles injection
 export const BuildingButton = () => {
     const isBuildingSelected = useValue(isBuildingSelected$);
     const selectedBuildingEntity = useValue(selectedBuildingEntity$);
+    const [isPanelOpen, setIsPanelOpen] = useState(false);
 
-    console.log("BuildingButton render - isBuildingSelected:", isBuildingSelected, "selectedBuildingEntity:", selectedBuildingEntity);
+    // Handle panel open/close
+    const handleOpenPanel = () => {
+        setIsPanelOpen(true);
+    };
 
+    const handleClosePanel = () => {
+        setIsPanelOpen(false);
+    };
+
+    // Close panel when building is deselected
     useEffect(() => {
-        if (isBuildingSelected && selectedBuildingEntity !== 0) {
-            console.log("BuildingButton: Starting polling for actions section");
+        if (!isBuildingSelected || selectedBuildingEntity === 0) {
+            setIsPanelOpen(false);
+        }
+    }, [isBuildingSelected, selectedBuildingEntity]);
+
+    // Handle button injection
+    useEffect(() => {
+        if (!isBuildingSelected || selectedBuildingEntity === 0) {
+            // Remove button when no building is selected
+            const container = document.getElementById(BUTTON_CONTAINER_ID);
+            if (container) {
+                ReactDOM.unmountComponentAtNode(container);
+                container.remove();
+            }
+            return;
+        }
+
+        let intervalId: number | undefined;
+        let attempts = 0;
+        const MAX_ATTEMPTS = 50; // 5 seconds at 100ms intervals
+        
+        const injectButton = (): boolean => {
+            attempts++;
             
-            // Clear any existing interval
-            if ((window as any).manageResourceChainsInterval) {
-                clearInterval((window as any).manageResourceChainsInterval);
+            // Find the actions section
+            const actionsSection = document.querySelector(ACTIONS_SECTION_CLASS);
+            if (!actionsSection) {
+                return false; // Keep polling
             }
             
-            // Use polling like FirstPersonCamera does
-            const checkAndInject = () => {
-                // Target the actions section where FOCUS and TOGGLE TRAFFIC ROUTES buttons are
-                const actionsSection = document.querySelector('.actions-section_X1x');
-                
-                if (!actionsSection) {
-                    console.log("Actions section not found yet, will keep polling...");
-                    return;
+            // Check if button container already exists
+            let container = actionsSection.querySelector<HTMLDivElement>(`#${BUTTON_CONTAINER_ID}`);
+            if (container) {
+                return true; // Success - stop polling
+            }
+            
+            // Create container div for React to render into
+            container = document.createElement('div');
+            container.id = BUTTON_CONTAINER_ID;
+            
+            // Insert before the first non-button element (spacer/divider)
+            // This ensures we're always in the left group of buttons
+            let insertBeforeElement = null;
+            for (let i = 0; i < actionsSection.children.length; i++) {
+                if (actionsSection.children[i].tagName !== 'BUTTON') {
+                    insertBeforeElement = actionsSection.children[i];
+                    break;
                 }
-                
-                // ALWAYS log analysis data for debugging, even if button exists
-                console.log("=== BUILDING PANEL ANALYSIS ===");
-                console.log("Entity:", selectedBuildingEntity);
-                console.log("Actions section found:", actionsSection.className);
-                console.log("Actions section children count:", actionsSection.children.length);
-                console.log("Actions section HTML:", actionsSection.innerHTML.substring(0, 500));
-                
-                // Log all children to understand the structure
-                console.log("Children details:");
-                for (let i = 0; i < actionsSection.children.length; i++) {
-                    const child = actionsSection.children[i];
-                    console.log(`  Child ${i}:`, {
-                        tag: child.tagName,
-                        className: child.className,
-                        id: child.id,
-                        textContent: child.textContent?.substring(0, 50)
-                    });
-                }
-                
-                // Check if there are existing buttons
-                const existingButtons = actionsSection.querySelectorAll('button');
-                console.log("Existing buttons count:", existingButtons.length);
-                existingButtons.forEach((btn, idx) => {
-                    console.log(`  Button ${idx}:`, {
-                        className: btn.className,
-                        hasIcon: btn.querySelector('img') !== null,
-                        iconSrc: btn.querySelector('img')?.src
-                    });
-                });
-                
-                // Check parent structure to understand different layouts
-                const parentSection = actionsSection.parentElement;
-                console.log("Parent section:", {
-                    className: parentSection?.className,
-                    childrenCount: parentSection?.children.length
-                });
-                console.log("=== END ANALYSIS ===");
-                
-                // Check if button already exists
-                const existingButton = actionsSection.querySelector('#manage-resource-chains-btn');
-                if (existingButton) {
-                    console.log("Button already exists");
-                    return;
-                }
-                
-                console.log("Creating and injecting button...");
-                
-                // Create button directly without wrapper div, styled like FirstPersonCamera button
-                const button = document.createElement('button');
-                button.id = 'manage-resource-chains-btn';
-                button.className = 'button_Z9O button_ECf item_It6 item-mouse-states_Fmi item-selected_tAM item-focused_FuT button_Z9O button_ECf item_It6 item-mouse-states_Fmi item-selected_tAM item-focused_FuT button_xGY';
-                button.style.cssText = 'margin-left: 6rem; margin-right: 8rem;';
-                
-                // Create icon - use an icon that exists
-                const icon = document.createElement('img');
-                icon.className = 'icon_Tdt icon_soN icon_Iwk';
-                icon.src = 'coui://uil/Standard/Link.svg';
-                
-                button.appendChild(icon);
-                button.onclick = () => {
-                    console.log("Manage Resource Chains clicked for entity:", selectedBuildingEntity);
-                    // TODO: Open management panel
-                };
-                
-                // Find the right insertion point - before any spacer/divider or right-aligned elements
-                // Look for elements that are NOT buttons (likely spacers) or elements with specific classes
-                let insertBeforeElement = null;
-                for (let i = 0; i < actionsSection.children.length; i++) {
-                    const child = actionsSection.children[i];
-                    // If it's not a button, it's likely a spacer - insert before it
-                    if (child.tagName !== 'BUTTON') {
-                        insertBeforeElement = child;
-                        console.log(`Found non-button element at index ${i}, will insert before it`);
-                        break;
+            }
+            
+            if (insertBeforeElement) {
+                actionsSection.insertBefore(container, insertBeforeElement);
+            } else {
+                actionsSection.appendChild(container);
+            }
+            
+            // Render the React component into the container (like FirstPersonCamera)
+            ReactDOM.render(
+                <ManageResourceChainsButton 
+                    onOpenPanel={handleOpenPanel}
+                />,
+                container
+            );
+            
+            return true; // Success - stop polling
+        };
+        
+        // Try immediately
+        if (!injectButton()) {
+            // Set up polling if first attempt failed
+            intervalId = window.setInterval(() => {
+                if (injectButton() || attempts >= MAX_ATTEMPTS) {
+                    if (intervalId !== undefined) {
+                        clearInterval(intervalId);
+                        intervalId = undefined;
                     }
                 }
-                
-                if (insertBeforeElement) {
-                    console.log("Inserting button before spacer/divider element");
-                    actionsSection.insertBefore(button, insertBeforeElement);
-                } else {
-                    console.log("No spacer found, appending to end of actions section");
-                    actionsSection.appendChild(button);
-                }
-                
-                console.log("Button injected successfully!");
-                
-                // Clear interval after successful injection
-                clearInterval((window as any).manageResourceChainsInterval);
-                delete (window as any).manageResourceChainsInterval;
-            };
-            
-            // Check immediately
-            checkAndInject();
-            
-            // Set up polling
-            (window as any).manageResourceChainsInterval = setInterval(checkAndInject, 100);
-            
-            // Clear after timeout
-            setTimeout(() => {
-                if ((window as any).manageResourceChainsInterval) {
-                    clearInterval((window as any).manageResourceChainsInterval);
-                    delete (window as any).manageResourceChainsInterval;
-                }
-            }, 5000);
-            
-        } else {
-            // Remove button when no building is selected
-            const existingButton = document.getElementById('manage-resource-chains-btn');
-            if (existingButton) {
-                console.log("Removing button from DOM");
-                existingButton.remove();
-            }
-            
-            // Clear any polling interval
-            if ((window as any).manageResourceChainsInterval) {
-                clearInterval((window as any).manageResourceChainsInterval);
-                delete (window as any).manageResourceChainsInterval;
-            }
+            }, 100);
         }
         
+        // Cleanup function
         return () => {
-            // Cleanup on unmount
-            const existingButton = document.getElementById('manage-resource-chains-btn');
-            if (existingButton) {
-                existingButton.remove();
+            if (intervalId !== undefined) {
+                clearInterval(intervalId);
+            }
+            const container = document.getElementById(BUTTON_CONTAINER_ID);
+            if (container) {
+                ReactDOM.unmountComponentAtNode(container);
+                container.remove();
             }
         };
     }, [isBuildingSelected, selectedBuildingEntity]);
 
-    // This component doesn't render anything itself - it injects into the DOM
-    return null;
+    // Render the panel directly when open (like CompanyBrandChanger does)
+    return (
+        <>
+            {isPanelOpen && selectedBuildingEntity !== 0 && (
+                <ManageResourceChainsPanel 
+                    entityId={selectedBuildingEntity} 
+                    onClose={handleClosePanel}
+                />
+            )}
+        </>
+    );
 };
 
+// District button component - shows in district panel
+export const DistrictButton = () => {
+    const isDistrictSelected = useValue(isDistrictSelected$);
+    const selectedDistrictEntity = useValue(selectedDistrictEntity$);
+    const [isPanelOpen, setIsPanelOpen] = useState(false);
+
+    // Handle panel open/close
+    const handleOpenPanel = () => {
+        setIsPanelOpen(true);
+    };
+
+    const handleClosePanel = () => {
+        setIsPanelOpen(false);
+    };
+
+    // Close panel when district is deselected
+    useEffect(() => {
+        if (!isDistrictSelected || selectedDistrictEntity === 0) {
+            setIsPanelOpen(false);
+        }
+    }, [isDistrictSelected, selectedDistrictEntity]);
+
+    // Handle button injection
+    useEffect(() => {
+        if (!isDistrictSelected || selectedDistrictEntity === 0) {
+            // Remove button when no district is selected
+            const container = document.getElementById(DISTRICT_BUTTON_CONTAINER_ID);
+            if (container) {
+                ReactDOM.unmountComponentAtNode(container);
+                container.remove();
+            }
+            return;
+        }
+
+        let intervalId: number | undefined;
+        let attempts = 0;
+        const MAX_ATTEMPTS = 50; // 5 seconds at 100ms intervals
+        
+        const injectButton = (): boolean => {
+            attempts++;
+            
+            // Find the actions section
+            const actionsSection = document.querySelector(ACTIONS_SECTION_CLASS);
+            if (!actionsSection) {
+                return false; // Keep polling
+            }
+            
+            // Check if button container already exists
+            let container = actionsSection.querySelector<HTMLDivElement>(`#${DISTRICT_BUTTON_CONTAINER_ID}`);
+            if (container) {
+                return true; // Success - stop polling
+            }
+            
+            // Create container div for React to render into
+            container = document.createElement('div');
+            container.id = DISTRICT_BUTTON_CONTAINER_ID;
+            
+            // Insert before the first non-button element (spacer/divider)
+            let insertBeforeElement = null;
+            for (let i = 0; i < actionsSection.children.length; i++) {
+                if (actionsSection.children[i].tagName !== 'BUTTON') {
+                    insertBeforeElement = actionsSection.children[i];
+                    break;
+                }
+            }
+            
+            if (insertBeforeElement) {
+                actionsSection.insertBefore(container, insertBeforeElement);
+            } else {
+                actionsSection.appendChild(container);
+            }
+            
+            // Render the React component into the container
+            ReactDOM.render(
+                <ManageResourceChainsButton 
+                    onOpenPanel={handleOpenPanel}
+                />,
+                container
+            );
+            
+            return true; // Success - stop polling
+        };
+        
+        // Try immediately
+        if (!injectButton()) {
+            // Set up polling if first attempt failed
+            intervalId = window.setInterval(() => {
+                if (injectButton() || attempts >= MAX_ATTEMPTS) {
+                    if (intervalId !== undefined) {
+                        clearInterval(intervalId);
+                        intervalId = undefined;
+                    }
+                }
+            }, 100);
+        }
+        
+        // Cleanup function
+        return () => {
+            if (intervalId !== undefined) {
+                clearInterval(intervalId);
+            }
+            const container = document.getElementById(DISTRICT_BUTTON_CONTAINER_ID);
+            if (container) {
+                ReactDOM.unmountComponentAtNode(container);
+                container.remove();
+            }
+        };
+    }, [isDistrictSelected, selectedDistrictEntity]);
+
+    // Render the panel directly when open (using districtConfig$ instead of resourceChainConfig$)
+    return (
+        <>
+            {isPanelOpen && selectedDistrictEntity !== 0 && (
+                <ManageResourceChainsPanel 
+                    entityId={selectedDistrictEntity} 
+                    onClose={handleClosePanel}
+                    configBinding$={districtConfig$}
+                    isDistrict={true}
+                />
+            )}
+        </>
+    );
+};

@@ -1,5 +1,5 @@
 import { ModRegistrar } from "cs2/modding";
-import { BuildingButton } from "mods/building-button";
+import { BuildingButton, DistrictButton } from "mods/building-button";
 
 const register: ModRegistrar = (moduleRegistry) => {
     console.log("===== ManageResourceChains UI: Starting registration =====");
@@ -12,6 +12,15 @@ const register: ModRegistrar = (moduleRegistry) => {
         console.log("ManageResourceChains: Successfully appended BuildingButton to Game!");
     } catch (error) {
         console.error("ManageResourceChains: ERROR appending BuildingButton:", error);
+    }
+    
+    // Add district button
+    console.log("ManageResourceChains: About to append DistrictButton to Game...");
+    try {
+        moduleRegistry.append('Game', DistrictButton);
+        console.log("ManageResourceChains: Successfully appended DistrictButton to Game!");
+    } catch (error) {
+        console.error("ManageResourceChains: ERROR appending DistrictButton:", error);
     }
     
     console.log("===== ManageResourceChains UI: Registration complete =====");

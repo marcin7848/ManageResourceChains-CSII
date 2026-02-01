@@ -33,25 +33,13 @@ namespace ManageResourceChains.Systems
             var selectedEntity = toolSystem.selected;
             
             // Check if a building is selected
-            bool isBuildingSelected = false;
-            if (selectedEntity != Entity.Null && EntityManager.HasComponent<Building>(selectedEntity))
-            {
-                isBuildingSelected = true;
-                _selectedBuildingEntity.Update(selectedEntity.Index);
-                Mod.log.Info($"Building selected! Entity: {selectedEntity.Index}");
-            }
-            else
-            {
-                _selectedBuildingEntity.Update(0);
-                // Only log occasionally to avoid spam
-                if (UnityEngine.Time.frameCount % 60 == 0)
-                {
-                    Mod.log.Info($"No building selected. Entity: {selectedEntity.Index}, IsNull: {selectedEntity == Entity.Null}");
-                }
-            }
+            bool isBuildingSelected = selectedEntity != Entity.Null && 
+                                      EntityManager.HasComponent<Building>(selectedEntity);
             
+            // ValueBinding.Update() is smart - it only triggers UI updates when the value actually changes
+            // So calling it every frame is fine and expected in ECS
             _isBuildingSelected.Update(isBuildingSelected);
+            _selectedBuildingEntity.Update(isBuildingSelected ? selectedEntity.Index : 0);
         }
     }
 }
-
