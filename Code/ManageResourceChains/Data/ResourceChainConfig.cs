@@ -79,6 +79,35 @@ namespace ManageResourceChains.Data
         Resources
     }
 
+    /// <summary>
+    /// Specific type of service for more granular control
+    /// </summary>
+    public enum ServiceType
+    {
+        All,            // Applies to all services
+        Healthcare,     // Hospitals, ambulances, medical helicopters
+        Deathcare,      // Cemeteries, crematoriums, hearses
+        Fire,           // Fire stations, fire engines, fire helicopters
+        Police,         // Police stations, police cars, police helicopters
+        Garbage,        // Garbage facilities, garbage trucks
+        Post,           // Post offices, post vans
+        Evacuation,     // Emergency shelters, evacuation buses
+        Maintenance     // Maintenance depots, maintenance vehicles
+    }
+
+    /// <summary>
+    /// Specific type of resource for more granular control
+    /// </summary>
+    public enum ResourceType
+    {
+        All,                // Applies to all resources
+        RawMaterials,       // Grain, livestock, vegetables, wood, stone, coal, oil, ore
+        ProcessedGoods,     // Food, textiles, paper, metals, plastics, electronics
+        CommercialGoods,    // Retail goods
+        Electricity,        // Power distribution
+        Water              // Water and sewage
+    }
+
     public enum TransportStationType
     {
         TrainStation,
